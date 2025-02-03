@@ -15,7 +15,13 @@
 //! let img = image::open("path/to/image.pcx").unwrap();
 //! ```
 
+#[cfg(feature = "pcx")]
+pub mod pcx;
+
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
-    // TODO
+    image::hooks::register_decoding_hook(
+        image::ImageFormat::Pcx,
+        Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
+    );
 }

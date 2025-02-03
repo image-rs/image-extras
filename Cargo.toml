@@ -7,8 +7,13 @@ publish = false
 
 include = ["src", "tests/reference.rs"]
 
+[features]
+default = ["pcx"]
+pcx = []
+
 [dependencies]
 image = { version = "0.25.5", default-features = false }
+pcx = "0.2.4"
 
 [dev-dependencies]
 image = { version = "0.25.5", default-features = false, features = ["png"] }
