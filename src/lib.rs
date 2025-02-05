@@ -18,10 +18,17 @@
 #[cfg(feature = "pcx")]
 pub mod pcx;
 
+#[cfg(feature = "wbmp")]
+pub mod wbmp;
+
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
     image::hooks::register_decoding_hook(
         image::ImageFormat::Pcx,
         Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
+    );
+    image::hooks::register_decoding_hook(
+        image::ImageFormat::Wbmp,
+        Box::new(|r| Ok(Box::new(wbmp::WbmpDecoder::new(r)?))),
     );
 }
