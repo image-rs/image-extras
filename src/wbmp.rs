@@ -1,3 +1,5 @@
+//! Encoding and Deciding of WBMP Images
+//!
 //! WBMP (Wireless BitMaP) Format is an image format used by the WAP protocol.
 //!
 //! # Related Links
@@ -10,8 +12,6 @@ use image::error::{
     DecodingError, EncodingError, ImageFormatHint, UnsupportedError, UnsupportedErrorKind,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
-
-use wbmp::error::WbmpError;
 
 /// Encoder for Wbmp images.
 pub struct WbmpEncoder<'a, W> {
@@ -62,10 +62,7 @@ impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
             let mut encoder = wbmp::Encoder::new(&mut writer);
             encoder.encode(buf, width, height, color)
         }
-        .map_err(|err| match err {
-            WbmpError::IoError(io) => ImageError::IoError(io),
-            _ => todo!(),
-        })?;
+        .map_err(convert_wbmp_error)?;
         Ok(())
     }
 }
@@ -85,14 +82,14 @@ where
 {
     /// Create a new `WbmpDecoder`.
     pub fn new(r: R) -> Result<WbmpDecoder<R>, ImageError> {
-        let inner = wbmp::Decoder::new(r).map_err(convert_wbmp_decode_error)?;
+        let inner = wbmp::Decoder::new(r).map_err(convert_wbmp_error)?;
         let dimensions = inner.dimensions();
 
         Ok(WbmpDecoder { dimensions, inner })
     }
 }
 
-fn convert_wbmp_decode_error(err: wbmp::error::WbmpError) -> ImageError {
+fn convert_wbmp_error(err: wbmp::error::WbmpError) -> ImageError {
     use wbmp::error::WbmpError;
     match err {
         WbmpError::IoError(inner) => ImageError::IoError(inner),
@@ -139,7 +136,7 @@ impl<R: BufRead + Seek> ImageDecoder for WbmpDecoder<R> {
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
         self.inner
             .read_image_data(buf)
-            .map_err(convert_wbmp_decode_error)?;
+            .map_err(convert_wbmp_error)?;
         Ok(())
     }
 

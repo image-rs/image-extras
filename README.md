@@ -7,6 +7,7 @@ Decoding support for additional image formats beyond those provided by the [`ima
 | --------- | -------------------- |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
 | WBMP | [Wikipedia](https://en.wikipedia.org/wiki/Wireless_Application_Protocol_Bitmap_Format) |
+| OTB | [Wikipedia](https://en.wikipedia.org/wiki/OTA_bitmap) |
 
 ## New Formats
 
