@@ -8,8 +8,9 @@ publish = false
 include = ["src", "tests/reference.rs"]
 
 [features]
-default = ["pcx"]
+default = ["pcx", "xbm"]
 pcx = ["dep:pcx"]
+xbm = []
 
 [dependencies]
 image = { version = "0.25.8", default-features = false }

@@ -6,6 +6,7 @@ Decoding support for additional image formats beyond those provided by the [`ima
 | Extension | File Format Description |
 | --------- | -------------------- |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
+| XBM | [Wikipedia](https://en.wikipedia.org/wiki/X_BitMap) |
 
 ## New Formats
 
