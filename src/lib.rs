@@ -21,14 +21,23 @@ pub mod pcx;
 #[cfg(feature = "wbmp")]
 pub mod wbmp;
 
+#[cfg(feature = "otb")]
+pub mod otb;
+
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
     image::hooks::register_decoding_hook(
         image::ImageFormat::Pcx,
         Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
     );
+    #[cfg(feature = "wbmp")]
     image::hooks::register_decoding_hook(
         image::ImageFormat::Wbmp,
         Box::new(|r| Ok(Box::new(wbmp::WbmpDecoder::new(r)?))),
+    );
+    #[cfg(feature = "otb")]
+    image::hooks::register_decoding_hook(
+        image::ImageFormat::Otb,
+        Box::new(|r| Ok(Box::new(otb::OtbDecoder::new(r)?))),
     );
 }

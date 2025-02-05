@@ -8,14 +8,15 @@ publish = false
 include = ["src", "tests/reference.rs"]
 
 [features]
-default = ["pcx", "wbmp"]
+default = ["pcx", "wbmp", "otb"]
 pcx = []
-wbmp = []
+wbmp = ["dep:wbmp"]
+otb = []
 
 [dependencies]
 image = { version = "0.25.5", default-features = false }
 pcx = "0.2.4"
-wbmp = "0.1.2"
+wbmp = { version = "0.1.2", optional = true }
 
 [dev-dependencies]
 image = { version = "0.25.5", default-features = false, features = ["png"] }
