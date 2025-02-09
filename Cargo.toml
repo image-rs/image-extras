@@ -9,11 +9,11 @@ include = ["src", "tests/reference.rs"]
 
 [features]
 default = ["pcx"]
-pcx = []
+pcx = ["dep:pcx"]
 
 [dependencies]
 image = { version = "0.25.5", default-features = false }
-pcx = "0.2.4"
+pcx = { version = "0.2.4", optional = true }
 
 [dev-dependencies]
 image = { version = "0.25.5", default-features = false, features = ["png"] }
