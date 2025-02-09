@@ -13,10 +13,10 @@ We welcome PRs to add support for additional image formats.
 
 #### Required criteria
 
-- [ ] Must be one of the raster image formats recognized by [ImageMagick](https://imagemagick.org/script/formats.php).
+- [ ] Must be one of the raster image formats [recognized by ImageMagick](https://imagemagick.org/script/formats.php).
 - [ ] No patent or licensing restrictions.
 - [ ] Specification or sufficiently detailed file format description freely available online.
-- [ ] Must include multiple test images with suitable licenses.
+- [ ] Must include multiple test images, and their source/license should be mentioned in the PR description.
 - [ ] Implementation must be entirely in Rust.
 
 #### Additional nice-to-haves
