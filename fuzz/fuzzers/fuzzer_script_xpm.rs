@@ -1,13 +1,12 @@
 #![no_main]
-#[macro_use]
-extern crate libfuzzer_sys;
+#[macro_use] extern crate libfuzzer_sys;
 
 use std::io::Cursor;
 use image::ImageDecoder;
 
 fuzz_target!(|data: &[u8]| {
     let reader = Cursor::new(data);
-    let Ok(mut decoder) = image_extras::xbm::XbmDecoder::new(reader) else {
+    let Ok(mut decoder) = image_extras::xpm::XpmDecoder::new(reader) else {
         return;
     };
     let mut limits = image::Limits::default();

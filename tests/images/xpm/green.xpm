@@ -1,0 +1,15 @@
+/* XPM */
+static char *vert_pâle[] = {
+/* columns rows colors chars-per-pixel */
+"5 5 4 1 ",
+"  c green",
+". c #AAFF7F",
+"X c #80FF80",
+"o c white",
+/* pixels */
+" X.oo",
+"X X.o",
+".X X.",
+"..X X",
+"....."
+};

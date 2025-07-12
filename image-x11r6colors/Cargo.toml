@@ -1,0 +1,8 @@
+[package]
+name = "image-x11r6colors"
+version = "1.0.0"
+license = "(MIT OR Apache-2.0) AND X11"
+rust-version = "1.17.0"
+description = "Color database matching X11R6"
+readme = "README.md"
+publish = false
