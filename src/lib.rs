@@ -21,7 +21,8 @@ pub mod pcx;
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
     image::hooks::register_decoding_hook(
-        image::ImageFormat::Pcx,
+        "pcx".into(),
         Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
     );
+    image::hooks::register_format_detection_hook("pcx".into(), &[0x0a, 0x0], Some(b"\xFF\xF8"));
 }
