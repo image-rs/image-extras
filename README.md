@@ -11,6 +11,7 @@ Decoding support for additional image formats beyond those provided by the
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
 | WBMP | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
 | OTB | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
+| SGI | [Specification](https://web.archive.org/web/20010413154909/https://reality.sgi.com/grafica/sgiimage.html) |
 | XBM | [Specification](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps) |
 | XPM | [Specification](https://www.x.org/docs/XPM/xpm.pdf) |
 
