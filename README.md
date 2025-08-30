@@ -27,8 +27,8 @@ We welcome PRs to add support for additional image formats.
 ## Fuzzing
 
 Fuzzing is not a priority for this crate and decoders may panic or worse on
-malformed input. Please do not open issues for crashes found by fuzzing, though
-PRs fixing them are welcome.
+malformed input. Please do not open issues for crashes found by fuzzing,
+unless they are memory safety violations, though PRs fixing them are welcome.
 
 This is an intentional tradeoff to balance the inclusion criteria for new
 formats with maintainer time and effort.
