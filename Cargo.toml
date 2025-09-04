@@ -12,12 +12,10 @@ default = ["pcx"]
 pcx = ["dep:pcx"]
 
 [dependencies]
-image = { version = "0.25.5", default-features = false }
+image = { version = "0.25.8", default-features = false }
 pcx = { version = "0.2.4", optional = true }
 
 [dev-dependencies]
-image = { version = "0.25.5", default-features = false, features = ["png"] }
+image = { version = "0.25.8", default-features = false, features = ["png"] }
 walkdir = "2.5.0"
 
-[patch.crates-io]
-image = { git = "https://github.com/fintelia/image", branch = "decoding-hooks" }
