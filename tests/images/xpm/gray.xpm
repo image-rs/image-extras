@@ -1,0 +1,10 @@
+/* XPM */
+static char *dummy[] = {
+" 6 1 6 8 ",
+"0xxxxxxx c LIGHTslateGRAY",
+"1xxxxxxx c light slate gray",
+"2xxxxxxx c #789",
+"3xxxxxxx c #778899",
+"4xxxxxxx c #777888999",
+"5xxxxxxx c #777788889999",
+"0xxxxxxx1xxxxxxx2xxxxxxx3xxxxxxx4xxxxxxx5xxxxxxx"};

@@ -1,0 +1,20 @@
+/* XPM */
+static char *snaaake[] = {
+/* a simple example with various color types + transparency */
+   "20 5 10 1",
+"b c #000000",
+"# c #f00",
+"a c #ff8000",
+"c c wheat2",
+". c none s wind",
+"+ c none s air",
+"/ c none s fire",
+"? c none s water",
+"R c medium violet red",
+"g c #f0f",
+".#....aaa...aaa.....",
+"bab.aac.a...a.a..a//",
+"a#a.a...a.aca.a.aa..",
+".acaa...a.a...caa...",
+"??+?????aaa?????????"};
+
