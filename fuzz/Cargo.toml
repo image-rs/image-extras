@@ -1,0 +1,27 @@
+
+[package]
+name = "image-fuzz"
+version = "0.0.1"
+authors = ["Automatically generated"]
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+image = { version = "0.25.8", default-features = false }
+
+[dependencies.image-extras]
+path = ".."
+features = []
+[dependencies.libfuzzer-sys]
+version = "0.4"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzzer_script_pcx"
+path = "fuzzers/fuzzer_script_pcx.rs"
