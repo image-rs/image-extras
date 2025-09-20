@@ -14,6 +14,7 @@
 //! // Now you can use the image crate as normal
 //! let img = image::open("path/to/image.pcx").unwrap();
 //! ```
+use image::Limits;
 
 #[cfg(feature = "pcx")]
 pub mod pcx;
@@ -23,6 +24,9 @@ pub mod xbm;
 
 #[cfg(feature = "xpm")]
 pub mod xpm;
+
+#[cfg(feature = "ora")]
+pub mod ora;
 
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
@@ -51,4 +55,16 @@ pub fn register() {
     if just_registered_xpm {
         image::hooks::register_format_detection_hook("xpm".into(), b"/* XPM */", None);
     }
+
+    // OpenRaster images are ZIP files and have no simple signature to distinguish them
+    // from ZIP files containing other content
+    image::hooks::register_decoding_hook(
+        "ora".into(),
+        Box::new(|r| {
+            Ok(Box::new(ora::OpenRasterDecoder::with_limits(
+                r,
+                Limits::no_limits(),
+            )?))
+        }),
+    );
 }

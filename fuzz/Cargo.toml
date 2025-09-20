@@ -33,3 +33,7 @@ path = "fuzzers/fuzzer_script_xbm.rs"
 [[bin]]
 name = "fuzzer_script_xpm"
 path = "fuzzers/fuzzer_script_xpm.rs"
+
+[[bin]]
+name = "fuzzer_script_ora"
+path = "fuzzers/fuzzer_script_ora.rs"

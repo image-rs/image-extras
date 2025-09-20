@@ -8,15 +8,19 @@ publish = false
 include = ["src", "tests/reference.rs"]
 
 [features]
-default = ["pcx", "xbm", "xpm"]
+default = ["pcx", "xbm", "xpm", "ora"]
 pcx = ["dep:pcx"]
 xbm = []
 xpm = ["dep:image-x11r6colors"]
+ora = ["image/png", "dep:zip", "dep:ouroboros"]
 
 [dependencies]
 image = { version = "0.25.8", default-features = false }
 pcx = { version = "0.2.4", optional = true }
 image-x11r6colors = { path = 'image-x11r6colors', version = "1.0.0", optional = true }
+# OpenRaster only requires DEFLATED and STORED modes
+zip = { version = "5.1.1", default-features = false, features = ["deflate"], optional = true }
+ouroboros = { version = "0.18.5", optional = true }
 
 [dev-dependencies]
 image = { version = "0.25.8", default-features = false, features = ["png"] }
