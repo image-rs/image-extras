@@ -46,7 +46,6 @@
 //! * <https://gitlab.freedesktop.org/xorg/app/rgb/raw/master/rgb.txt> - X color names
 //! * <https://www.x.org/wiki/X11R4/#index10h4> - Introduction of modern X11 color name table
 //! * <https://web.archive.org/web/20070808230118/http://koala.ilog.fr/ftp/pub/xpm/> - more historical XPM material
-#![forbid(unsafe_code)]
 
 mod x11r6colors;
 
