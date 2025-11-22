@@ -8,12 +8,15 @@ publish = false
 include = ["src", "tests/reference.rs"]
 
 [features]
-default = ["pcx"]
+default = ["pcx", "xbm", "xpm"]
 pcx = ["dep:pcx"]
+xbm = []
+xpm = ["dep:image-x11r6colors"]
 
 [dependencies]
 image = { version = "0.25.8", default-features = false }
 pcx = { version = "0.2.4", optional = true }
+image-x11r6colors = { path = 'image-x11r6colors', version = "1.0.0", optional = true }
 
 [dev-dependencies]
 image = { version = "0.25.8", default-features = false, features = ["png"] }

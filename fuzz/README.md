@@ -5,6 +5,10 @@ For the possibly more up-to-date guide see <https://fuzz.rs/book/cargo-fuzz/setu
 > $ cargo install cargo-fuzz
 > $ cargo +nightly fuzz run fuzzer_script_<format>
 
+Fuzzing may progress faster for certain formats if seeded with a dictionary:
+
+> $ cargo +nightly fuzz run fuzzer_script_xbm -- -dict=fuzz/dictionaries/xbm.dict
+
 # Bug reports
 
 As explained in the project [README](../README.md), fuzzing is not a priority for
