@@ -3,8 +3,6 @@
 Decoding support for additional image formats beyond those provided by the
 [`image`](https://crates.io/crates/image) crate.
 
-
-
 ## Supported formats
 
 | Extension | Specification or Format Description |
@@ -35,6 +33,13 @@ We welcome PRs to add support for additional image formats.
 
 - [ ] Minimal or no dependencies on external libraries.
 - [ ] No use of unsafe code.
+
+## Version Compatibility
+
+| `image` crate version | Compatible `image-extras` versions |
+| --------------------- | ---------------------------------- |
+| 0.25.x                | 0.1.x                              |
+
 
 ## Fuzzing
 
