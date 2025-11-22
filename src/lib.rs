@@ -14,7 +14,8 @@
 //! // Now you can use the image crate as normal
 //! let img = image::open("path/to/image.pcx").unwrap();
 //! ```
-use image::Limits;
+
+#![forbid(unsafe_code)]
 
 #[cfg(feature = "pcx")]
 pub mod pcx;
@@ -44,7 +45,7 @@ pub fn register() {
             Box::new(|r| {
                 Ok(Box::new(ora::OpenRasterDecoder::with_limits(
                     r,
-                    Limits::no_limits(),
+                    image::Limits::no_limits(),
                 )?))
             }),
         );

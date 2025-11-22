@@ -9,7 +9,7 @@
 //! # Related Links
 //! * <https://en.wikipedia.org/wiki/OpenRaster> - The OpenRaster format on Wikipedia
 //! * <https://www.openraster.org/> - OpenRaster specification
-#![forbid(unsafe_code)]
+
 use image::codecs::png::PngDecoder;
 use image::error::{DecodingError, ImageFormatHint, UnsupportedError};
 use image::metadata::Orientation;

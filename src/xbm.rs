@@ -8,7 +8,6 @@
 //! # Related Links
 //! * <https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps> - The XBM format specification
 //! * <https://en.wikipedia.org/wiki/X_BitMap> - The XBM format on wikipedia
-#![forbid(unsafe_code)]
 
 use std::fmt;
 use std::io::{BufRead, Bytes};
