@@ -48,6 +48,8 @@
 //! * <https://web.archive.org/web/20070808230118/http://koala.ilog.fr/ftp/pub/xpm/> - more historical XPM material
 #![forbid(unsafe_code)]
 
+mod x11r6colors;
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::io::{BufRead, Bytes};
@@ -635,10 +637,9 @@ fn parse_color(data: &[u8]) -> Result<[u16; 4], XpmDecodeError> {
             return Ok([0, 0, 0, 0]);
         }
 
-        if let Ok(idx) =
-            image_x11r6colors::COLORS.binary_search_by(|entry| entry.0.as_bytes().cmp(data))
+        if let Ok(idx) = x11r6colors::COLORS.binary_search_by(|entry| entry.0.as_bytes().cmp(data))
         {
-            let entry = image_x11r6colors::COLORS[idx];
+            let entry = x11r6colors::COLORS[idx];
             Ok([
                 scale_u8_to_u16(entry.1),
                 scale_u8_to_u16(entry.2),
@@ -757,9 +758,7 @@ fn read_xpm_palette<R: Iterator<Item = u8>>(
     assert!(1 <= info.cpp && info.cpp <= 8);
 
     // Check that color table is sorted
-    assert!(image_x11r6colors::COLORS
-        .windows(2)
-        .all(|p| p[0].0 < p[1].0));
+    assert!(x11r6colors::COLORS.windows(2).all(|p| p[0].0 < p[1].0));
 
     // Even though the file provides a value for `ncolors`, and memory limits are validated,
     // do NOT reserve the suggested memory in advance. Dynamically resizing the vector

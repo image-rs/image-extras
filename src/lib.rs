@@ -28,43 +28,53 @@ pub mod xpm;
 #[cfg(feature = "ora")]
 pub mod ora;
 
+#[allow(unused_imports)]
+use image::hooks::{register_decoding_hook, register_format_detection_hook};
+
+static REGISTER: std::sync::Once = std::sync::Once::new();
+
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
-    let just_registered_pcx = image::hooks::register_decoding_hook(
-        "pcx".into(),
-        Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
-    );
-    if just_registered_pcx {
-        image::hooks::register_format_detection_hook("pcx".into(), &[0x0a, 0x0], Some(b"\xFF\xF8"));
-    }
+    REGISTER.call_once(|| {
+        // OpenRaster images are ZIP files and have no simple signature to distinguish them
+        // from ZIP files containing other content
+        #[cfg(feature = "ora")]
+        register_decoding_hook(
+            "ora".into(),
+            Box::new(|r| {
+                Ok(Box::new(ora::OpenRasterDecoder::with_limits(
+                    r,
+                    Limits::no_limits(),
+                )?))
+            }),
+        );
 
-    // XBM images are often valid C code and have no simple and reliably distinguishing file signature
-    image::hooks::register_decoding_hook(
-        "xbm".into(),
-        Box::new(|r| Ok(Box::new(xbm::XbmDecoder::new(r)?))),
-    );
-    image::hooks::register_decoding_hook(
-        "bm".into(),
-        Box::new(|r| Ok(Box::new(xbm::XbmDecoder::new(r)?))),
-    );
+        #[cfg(feature = "pcx")]
+        if register_decoding_hook(
+            "pcx".into(),
+            Box::new(|r| Ok(Box::new(pcx::PCXDecoder::new(r)?))),
+        ) {
+            register_format_detection_hook("pcx".into(), &[0x0a, 0x0], Some(b"\xFF\xF8"));
+        }
 
-    let just_registered_xpm = image::hooks::register_decoding_hook(
-        "xpm".into(),
-        Box::new(|r| Ok(Box::new(xpm::XpmDecoder::new(r)?))),
-    );
-    if just_registered_xpm {
-        image::hooks::register_format_detection_hook("xpm".into(), b"/* XPM */", None);
-    }
+        #[cfg(feature = "xbm")]
+        {
+            register_decoding_hook(
+                "xbm".into(),
+                Box::new(|r| Ok(Box::new(xbm::XbmDecoder::new(r)?))),
+            );
+            register_decoding_hook(
+                "bm".into(),
+                Box::new(|r| Ok(Box::new(xbm::XbmDecoder::new(r)?))),
+            );
+        }
 
-    // OpenRaster images are ZIP files and have no simple signature to distinguish them
-    // from ZIP files containing other content
-    image::hooks::register_decoding_hook(
-        "ora".into(),
-        Box::new(|r| {
-            Ok(Box::new(ora::OpenRasterDecoder::with_limits(
-                r,
-                Limits::no_limits(),
-            )?))
-        }),
-    );
+        #[cfg(feature = "xpm")]
+        if register_decoding_hook(
+            "xpm".into(),
+            Box::new(|r| Ok(Box::new(xpm::XpmDecoder::new(r)?))),
+        ) {
+            register_format_detection_hook("xpm".into(), b"/* XPM */", None);
+        }
+    });
 }

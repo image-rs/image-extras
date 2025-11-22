@@ -1,14 +1,23 @@
 # image-extras
-Decoding support for additional image formats beyond those provided by the [`image`](https://crates.io/crates/image) crate.
+
+Decoding support for additional image formats beyond those provided by the
+[`image`](https://crates.io/crates/image) crate.
+
+
 
 ## Supported formats
 
-| Extension | File Format Description |
+| Extension | Specification or Format Description |
 | --------- | -------------------- |
+| ORA | [Specification](https://www.openraster.org) |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
-| XBM | [Wikipedia](https://en.wikipedia.org/wiki/X_BitMap) |
-| XPM | [Wikipedia](https://en.wikipedia.org/wiki/X_PixMap) |
-| ORA | [Wikipedia](https://en.wikipedia.org/wiki/OpenRaster) |
+| XBM | [Specification](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps) |
+| XPM | [Specification](https://www.x.org/docs/XPM/xpm.pdf) |
+
+By default, `image-extras` enables support for all included formats. This is
+convienient for prototyping, but for other uses you are encouraged to evaluate
+the individual implementations and enable only the ones that meet your
+quality/robustness requirements.
 
 ## New Formats
 
