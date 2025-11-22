@@ -17,17 +17,23 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "ora")]
+pub mod ora;
+
+#[cfg(feature = "otb")]
+pub mod otb;
+
 #[cfg(feature = "pcx")]
 pub mod pcx;
+
+#[cfg(feature = "wbmp")]
+pub mod wbmp;
 
 #[cfg(feature = "xbm")]
 pub mod xbm;
 
 #[cfg(feature = "xpm")]
 pub mod xpm;
-
-#[cfg(feature = "ora")]
-pub mod ora;
 
 #[allow(unused_imports)]
 use image::hooks::{register_decoding_hook, register_format_detection_hook};
@@ -50,6 +56,12 @@ pub fn register() {
             }),
         );
 
+        #[cfg(feature = "otb")]
+        image::hooks::register_decoding_hook(
+            "otb".into(),
+            Box::new(|r| Ok(Box::new(otb::OtbDecoder::new(r)?))),
+        );
+
         #[cfg(feature = "pcx")]
         if register_decoding_hook(
             "pcx".into(),
@@ -57,6 +69,12 @@ pub fn register() {
         ) {
             register_format_detection_hook("pcx".into(), &[0x0a, 0x0], Some(b"\xFF\xF8"));
         }
+
+        #[cfg(feature = "wbmp")]
+        image::hooks::register_decoding_hook(
+            "wbmp".into(),
+            Box::new(|r| Ok(Box::new(wbmp::WbmpDecoder::new(r)?))),
+        );
 
         #[cfg(feature = "xbm")]
         {

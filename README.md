@@ -9,6 +9,8 @@ Decoding support for additional image formats beyond those provided by the
 | --------- | -------------------- |
 | ORA | [Specification](https://www.openraster.org) |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
+| WBMP | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
+| OTB | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
 | XBM | [Specification](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps) |
 | XPM | [Specification](https://www.x.org/docs/XPM/xpm.pdf) |
 
