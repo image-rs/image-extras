@@ -10,10 +10,8 @@ use std::error;
 use std::fmt::{self, Display};
 use std::io::{BufRead, Seek, Write};
 
-use image::error::{DecodingError, EncodingError, LimitError, LimitErrorKind};
-use image::{
-    ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageFormat, ImageResult,
-};
+use image::error::{DecodingError, EncodingError, ImageFormatHint, LimitError, LimitErrorKind};
+use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
 
 /// All errors that can occur when attempting to encode an image to OTB format
 #[derive(Debug, Clone)]
@@ -44,7 +42,7 @@ impl From<EncoderError> for ImageError {
             EncoderError::ImageTooLarge => {
                 ImageError::Limits(LimitError::from_kind(LimitErrorKind::DimensionError))
             }
-            _ => ImageError::Encoding(EncodingError::new(ImageFormat::Otb.into(), e)),
+            _ => ImageError::Encoding(EncodingError::new(ImageFormatHint::Name("otb".into()), e)),
         }
     }
 }
@@ -176,7 +174,7 @@ impl Display for DecoderError {
 
 impl From<DecoderError> for ImageError {
     fn from(e: DecoderError) -> ImageError {
-        ImageError::Decoding(DecodingError::new(ImageFormat::Otb.into(), e))
+        ImageError::Decoding(DecodingError::new(ImageFormatHint::Name("otb".into()), e))
     }
 }
 

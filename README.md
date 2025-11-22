@@ -1,13 +1,23 @@
 # image-extras
-Decoding support for additional image formats beyond those provided by the [`image`](https://crates.io/crates/image) crate.
+
+Decoding support for additional image formats beyond those provided by the
+[`image`](https://crates.io/crates/image) crate.
 
 ## Supported formats
 
-| Extension | File Format Description |
+| Extension | Specification or Format Description |
 | --------- | -------------------- |
+| ORA | [Specification](https://www.openraster.org) |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
-| WBMP | [Wikipedia](https://en.wikipedia.org/wiki/Wireless_Application_Protocol_Bitmap_Format) |
-| OTB | [Wikipedia](https://en.wikipedia.org/wiki/OTA_bitmap) |
+| WBMP | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
+| OTB | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
+| XBM | [Specification](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps) |
+| XPM | [Specification](https://www.x.org/docs/XPM/xpm.pdf) |
+
+By default, `image-extras` enables support for all included formats. This is
+convienient for prototyping, but for other uses you are encouraged to evaluate
+the individual implementations and enable only the ones that meet your
+quality/robustness requirements.
 
 ## New Formats
 
@@ -26,11 +36,18 @@ We welcome PRs to add support for additional image formats.
 - [ ] Minimal or no dependencies on external libraries.
 - [ ] No use of unsafe code.
 
+## Version Compatibility
+
+| `image` crate version | Compatible `image-extras` versions |
+| --------------------- | ---------------------------------- |
+| 0.25.x                | 0.1.x                              |
+
+
 ## Fuzzing
 
 Fuzzing is not a priority for this crate and decoders may panic or worse on
-malformed input. Please do not open issues for crashes found by fuzzing, though
-PRs fixing them are welcome.
+malformed input. Please do not open issues for crashes found by fuzzing,
+unless they are memory safety violations, though PRs fixing them are welcome.
 
 This is an intentional tradeoff to balance the inclusion criteria for new
 formats with maintainer time and effort.
