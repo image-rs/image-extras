@@ -7,6 +7,7 @@ Decoding support for additional image formats beyond those provided by the
 
 | Extension | Specification or Format Description |
 | --------- | -------------------- |
+| DDS | [Description](https://docs.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-pguide) |
 | ORA | [Specification](https://www.openraster.org) |
 | PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
 | WBMP | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
