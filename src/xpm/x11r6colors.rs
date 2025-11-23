@@ -48,7 +48,7 @@
 /// Table entries are (name, R, G, B) tuples.
 /// Names are lowercase.
 /// Some but not all multi-word names have an additional form with spaces between words.
-pub const COLORS: [(&str, u8, u8, u8); 752] = [
+pub const COLORS: &[(&str, u8, u8, u8)] = &[
     ("alice blue", 240, 248, 255),
     ("aliceblue", 240, 248, 255),
     ("antique white", 250, 235, 215),

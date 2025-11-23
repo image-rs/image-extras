@@ -92,7 +92,7 @@ impl<R: BufRead + Seek> ImageDecoder for PCXDecoder<R> {
             // by taking the paletted image into a buffer, then converting it to
             // RGB8 after.
             Some(palette_length) => {
-                let mut pal_buf: Vec<u8> = iter::repeat(0).take(height * width).collect();
+                let mut pal_buf: Vec<u8> = iter::repeat_n(0, height * width).collect();
 
                 for i in 0..height {
                     let offset = i * width;
@@ -102,7 +102,7 @@ impl<R: BufRead + Seek> ImageDecoder for PCXDecoder<R> {
                 }
 
                 let mut palette: Vec<u8> =
-                    iter::repeat(0).take(3 * palette_length as usize).collect();
+                    std::iter::repeat_n(0, 3 * palette_length as usize).collect();
                 self.inner
                     .read_palette(&mut palette[..])
                     .map_err(convert_pcx_decode_error)?;

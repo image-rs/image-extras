@@ -116,7 +116,7 @@ impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
                 };
             }
             if bit != 0 {
-                let _ = self.writer.write_all(&[current_byte])?;
+                self.writer.write_all(&[current_byte])?;
                 bit = 0;
                 current_byte = 0;
             }
@@ -452,7 +452,7 @@ mod test {
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
         let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
-        let _ = encoder
+        encoder
             .write_image(&img_data, 8, 8, image::ExtendedColorType::L8)
             .unwrap();
         encoded_data.iter().enumerate().for_each(|(i, byte)| {
@@ -490,7 +490,7 @@ mod test {
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
         let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
-        let _ = encoder
+        encoder
             .write_image(&img_data, 10, 10, image::ExtendedColorType::L8)
             .unwrap();
         encoded_data.iter().enumerate().for_each(|(i, byte)| {
