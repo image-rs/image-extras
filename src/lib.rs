@@ -17,6 +17,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "dds")]
+pub mod dds;
+
 #[cfg(feature = "ora")]
 pub mod ora;
 
@@ -46,6 +49,14 @@ static REGISTER: std::sync::Once = std::sync::Once::new();
 /// Register all enabled extra formats with the image crate.
 pub fn register() {
     REGISTER.call_once(|| {
+        #[cfg(feature = "dds")]
+        if register_decoding_hook(
+            "dds".into(),
+            Box::new(|r| Ok(Box::new(dds::DdsDecoder::new(r)?))),
+        ) {
+            register_format_detection_hook("dds".into(), b"DDS ", None);
+        }
+
         // OpenRaster images are ZIP files and have no simple signature to distinguish them
         // from ZIP files containing other content
         #[cfg(feature = "ora")]

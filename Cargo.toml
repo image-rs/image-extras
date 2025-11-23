@@ -8,10 +8,11 @@ publish = false
 include = ["src", "tests/reference.rs"]
 
 [features]
-default = ["ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
+default = ["dds", "ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
 
 # Each feature below is the file extention for the file format decoder it
 # enables.
+dds = ["dep:dds"]
 ora = ["image/png", "dep:zip", "dep:ouroboros"]
 otb = []
 sgi = []
@@ -25,6 +26,7 @@ xpm = []
 image = { version = "0.25.8", default-features = false }
 
 # Optional dependencies
+dds = { version = "0.2.0", optional = true }
 ouroboros = { version = "0.18.5", optional = true }
 pcx = { version = "0.2.4", optional = true }
 wbmp = { version = "0.1.2", optional = true }
