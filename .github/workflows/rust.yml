@@ -57,6 +57,15 @@ jobs:
     - name: Run rustfmt check
       run: cargo fmt -- --check
 
+  features:
+    # make sure that features compile individually
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack check --each-feature --no-dev-deps
+
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
