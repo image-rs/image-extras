@@ -1,8 +1,20 @@
 use walkdir::WalkDir;
 
+/// Test decoding of all images in `tests/images/` against reference PNG files.
+///
+/// If a reference PNG file for an image does not exist or does not match,
+/// it will be created/overwritten with the newly decoded image.
+///
+/// To add new test images, simply place them under `tests/images/{my format}/`
+/// and run `cargo test`.
+///
+/// Note: Images containing f32 data will be converted to u16, because PNG
+/// does not support floating-point data.
 #[test]
 fn test_decoding() {
     image_extras::register();
+
+    let mut errors = vec![];
 
     for entry in WalkDir::new("tests/images") {
         let entry = entry.unwrap();
@@ -10,14 +22,35 @@ fn test_decoding() {
             continue;
         }
 
-        let img = image::open(entry.path()).unwrap();
-        let reference = image::open(entry.path().with_extension("png")).unwrap();
+        let mut add_error = |e: &str| {
+            errors.push(format!("{}: {}", entry.path().display(), e));
+        };
 
-        assert_eq!(
-            img,
-            reference,
-            "Image {} does not match reference",
-            entry.path().display()
-        );
+        let png_path = entry.path().with_extension("png");
+
+        let img = match image::open(entry.path()) {
+            Ok(i) => i,
+            Err(e) => {
+                add_error(&format!("Cannot decode image: {e}"));
+                continue;
+            }
+        };
+
+        if !png_path.exists() {
+            add_error("No reference PNG file found");
+            _ = img.save(png_path); // save and ignore errors
+            continue;
+        }
+
+        let reference = image::open(&png_path).unwrap();
+
+        if img != reference {
+            add_error("Does not match reference");
+            _ = img.save(png_path); // save and ignore errors
+        }
+    }
+
+    if !errors.is_empty() {
+        panic!("Decoding errors:\n{}", errors.join("\n"));
     }
 }
