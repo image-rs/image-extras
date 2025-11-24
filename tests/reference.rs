@@ -1,3 +1,4 @@
+use image::ColorType;
 use walkdir::WalkDir;
 
 /// Test decoding of all images in `tests/images/` against reference PNG files.
@@ -18,15 +19,16 @@ fn test_decoding() {
 
     for entry in WalkDir::new("tests/images") {
         let entry = entry.unwrap();
-        if !entry.file_type().is_file() || entry.path().extension().unwrap() == "png" {
+        if !entry.file_type().is_file()
+            || entry.path().extension().unwrap() == "png"
+            || entry.path().extension().unwrap() == "tiff"
+        {
             continue;
         }
 
         let mut add_error = |e: &str| {
             errors.push(format!("{}: {}", entry.path().display(), e));
         };
-
-        let png_path = entry.path().with_extension("png");
 
         let img = match image::open(entry.path()) {
             Ok(i) => i,
@@ -36,9 +38,19 @@ fn test_decoding() {
             }
         };
 
-        if !png_path.exists() {
+        let ref_format = match img.color() {
+            ColorType::Rgb32F | ColorType::Rgba32F => "tiff",
+            _ => "png",
+        };
+        let ref_path = entry.path().with_extension(ref_format);
+
+        let save_reference = || {
+            _ = img.save(ref_path); // save and ignore errors
+        };
+
+        if !ref_path.exists() {
             add_error("No reference PNG file found");
-            _ = img.save(png_path); // save and ignore errors
+            save_reference();
             continue;
         }
 
@@ -46,7 +58,7 @@ fn test_decoding() {
 
         if img != reference {
             add_error("Does not match reference");
-            _ = img.save(png_path); // save and ignore errors
+            save_reference();
         }
     }
 
