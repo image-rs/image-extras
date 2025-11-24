@@ -1,4 +1,4 @@
-//! Encoding and Deciding of WBMP Images
+//! Encoding and Decoding of WBMP Images
 //!
 //! WBMP (Wireless BitMaP) Format is an image format used by the WAP protocol.
 //!

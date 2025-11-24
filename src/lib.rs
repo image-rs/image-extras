@@ -1,12 +1,6 @@
 //! This crate provides additional formats for the image crate.
 //!
-//! The enabled formats are controlled via Cargo features:
-//! ```toml
-//! [dependencies]
-//! image_extras = { version = "0.1", features = ["pcx"] }
-//! ```
-//!
-//! And you must also call the `register` function at program startup:
+//! Call the [`register`] function at program startup:
 //!
 //!  ```rust,no_run
 //! image_extras::register();
@@ -14,6 +8,9 @@
 //! // Now you can use the image crate as normal
 //! let img = image::open("path/to/image.pcx").unwrap();
 //! ```
+//!
+//! By default, all supported formats are enabled. For finer control, enable
+//! individual formats via Cargo features.
 
 #![forbid(unsafe_code)]
 
@@ -44,6 +41,9 @@ use image::hooks::{register_decoding_hook, register_format_detection_hook};
 static REGISTER: std::sync::Once = std::sync::Once::new();
 
 /// Register all enabled extra formats with the image crate.
+///
+/// Calling this function more than once is allowed but has no additional
+/// effect.
 pub fn register() {
     REGISTER.call_once(|| {
         // OpenRaster images are ZIP files and have no simple signature to distinguish them
