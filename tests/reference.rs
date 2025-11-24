@@ -1,16 +1,14 @@
 use image::ColorType;
 use walkdir::WalkDir;
 
-/// Test decoding of all images in `tests/images/` against reference PNG files.
+/// Test decoding of all test images in `tests/images/` against reference images
+/// (either PNG or TIFF).
 ///
-/// If a reference PNG file for an image does not exist or does not match,
+/// If a reference image for a test image does not exist or does not match,
 /// it will be created/overwritten with the newly decoded image.
 ///
 /// To add new test images, simply place them under `tests/images/{my format}/`
 /// and run `cargo test`.
-///
-/// Note: Images containing f32 data will be converted to u16, because PNG
-/// does not support floating-point data.
 #[test]
 fn test_decoding() {
     image_extras::register();
@@ -42,7 +40,7 @@ fn test_decoding() {
             ColorType::Rgb32F | ColorType::Rgba32F => "tiff",
             _ => "png",
         };
-        let ref_path = entry.path().with_extension(ref_format);
+        let ref_path = &entry.path().with_extension(ref_format);
 
         let save_reference = || {
             _ = img.save(ref_path); // save and ignore errors
@@ -54,7 +52,7 @@ fn test_decoding() {
             continue;
         }
 
-        let reference = image::open(&png_path).unwrap();
+        let reference = image::open(ref_path).unwrap();
 
         if img != reference {
             add_error("Does not match reference");
