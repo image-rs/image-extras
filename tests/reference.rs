@@ -1,3 +1,4 @@
+use image::ColorType;
 use walkdir::WalkDir;
 
 #[test]
@@ -6,12 +7,20 @@ fn test_decoding() {
 
     for entry in WalkDir::new("tests/images") {
         let entry = entry.unwrap();
-        if !entry.file_type().is_file() || entry.path().extension().unwrap() == "png" {
+        if !entry.file_type().is_file()
+            || entry.path().extension().unwrap() == "png"
+            || entry.path().extension().unwrap() == "tiff"
+        {
             continue;
         }
 
         let img = image::open(entry.path()).unwrap();
-        let reference = image::open(entry.path().with_extension("png")).unwrap();
+        let reference = match img.color() {
+            ColorType::Rgb32F | ColorType::Rgba32F => {
+                image::open(entry.path().with_extension("tiff")).unwrap()
+            }
+            _ => image::open(entry.path().with_extension("png")).unwrap(),
+        };
 
         assert_eq!(
             img,

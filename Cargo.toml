@@ -2,6 +2,7 @@
 name = "image-extras"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.89.0" # MSRV Policy: N-2
 license = "MIT OR Apache-2.0"
 publish = false
 
@@ -33,5 +34,5 @@ wbmp = { version = "0.1.2", optional = true }
 zip = { version = "5.1.1", default-features = false, features = ["deflate"], optional = true }
 
 [dev-dependencies]
-image = { version = "0.25.8", default-features = false, features = ["png"] }
+image = { version = "0.25.8", default-features = false, features = ["png", "tiff"] }
 walkdir = "2.5.0"
