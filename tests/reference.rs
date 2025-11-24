@@ -4,15 +4,23 @@ use walkdir::WalkDir;
 /// Test decoding of all test images in `tests/images/` against reference images
 /// (either PNG or TIFF).
 ///
-/// If a reference image for a test image does not exist or does not match,
-/// it will be created/overwritten with the newly decoded image.
+/// ## Bless mode
 ///
-/// To add new test images, simply place them under `tests/images/{my format}/`
-/// and run `cargo test`.
+/// If the `BLESS` environment variable is set, the test will update the reference images
+/// to match the newly decoded images. This is useful when adding new test images,
+/// updating existing ones, or seeing the output of incorrectly decoded images.
+///
+/// ```sh
+/// BLESS=1 cargo test
+/// ```
+/// ```powershell
+/// $env:BLESS=1; cargo test; $env:BLESS=$null
+/// ```
 #[test]
 fn test_decoding() {
     image_extras::register();
 
+    let bless = std::env::var("BLESS").is_ok();
     let mut errors = vec![];
 
     for entry in WalkDir::new("tests/images") {
@@ -43,7 +51,9 @@ fn test_decoding() {
         let ref_path = &entry.path().with_extension(ref_format);
 
         let save_reference = || {
-            _ = img.save(ref_path); // save and ignore errors
+            if bless {
+                _ = img.save(ref_path); // save and ignore errors
+            }
         };
 
         if !ref_path.exists() {
@@ -54,10 +64,18 @@ fn test_decoding() {
 
         let reference = image::open(ref_path).unwrap();
 
-        if img != reference {
+        if bless && img != reference {
             add_error("Does not match reference");
             save_reference();
+            continue;
         }
+
+        assert_eq!(
+            img,
+            reference,
+            "Image {} does not match reference",
+            entry.path().display()
+        );
     }
 
     if !errors.is_empty() {
