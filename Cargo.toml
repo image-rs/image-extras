@@ -11,8 +11,8 @@ include = ["src", "tests/reference.rs"]
 [features]
 default = ["ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
 
-# Each feature below is the file extention for the file format decoder it
-# enables.
+# Each feature below is the file extension for the file format encoder/decoder
+# it enables.
 ora = ["image/png", "dep:zip", "dep:ouroboros"]
 otb = []
 sgi = []

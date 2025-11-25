@@ -1,26 +1,47 @@
 # image-extras
 
-Decoding support for additional image formats beyond those provided by the
+Support for additional image formats beyond those provided by the
 [`image`](https://crates.io/crates/image) crate.
 
-## Supported formats
+## Usage
 
-| Extension | Specification or Format Description |
-| --------- | -------------------- |
-| ORA | [Specification](https://www.openraster.org) |
-| PCX | [Wikipedia](https://en.wikipedia.org/wiki/PCX#PCX_file_format) |
-| WBMP | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
-| OTB | [Specification](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf) |
-| SGI | [Specification](https://web.archive.org/web/20010413154909/https://reality.sgi.com/grafica/sgiimage.html) |
-| XBM | [Specification](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps) |
-| XPM | [Specification](https://www.x.org/docs/XPM/xpm.pdf) |
+Call the `register` function at program startup:
+
+```rust
+fn main() {
+    image_extras::register();
+
+    // Now you can use the image crate as normal
+    let img = image::open("path/to/image.pcx").unwrap();
+}
+```
+
+By default, all supported formats are enabled. For finer control, enable
+individual formats via Cargo features:
+
+```toml
+[dependencies]
+image_extras = { version = "0.1", features = ["pcx"], default-features = false }
+```
+
+## Supported Formats
+
+| Feature | Format
+| ------- | ------
+| `ora`   | OpenRaster [\[spec\]](https://www.openraster.org/)
+| `otb`   | OTA Bitmap (Over The Air Bitmap) [\[spec\]](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf)
+| `pcx`   | PCX (ZSoft Paintbrush bitmap/PiCture eXchange) [\[desc\]](https://en.wikipedia.org/wiki/PCX#PCX_file_format)
+| `sgi`   | SGI (Silicon Graphics Image) [\[spec\]](https://web.archive.org/web/20010413154909/https://reality.sgi.com/grafica/sgiimage.html)
+| `wbmp`  | Wireless Bitmap [\[spec\]](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf)
+| `xbm`   | X BitMap [\[spec\]](https://www.x.org/releases/X11R7.7/doc/libX11/libX11/libX11.html#Manipulating_Bitmaps)
+| `xpm`   | X PixMap [\[spec\]](https://www.x.org/docs/XPM/xpm.pdf)
 
 By default, `image-extras` enables support for all included formats. This is
-convienient for prototyping, but for other uses you are encouraged to evaluate
+convenient for prototyping, but for other uses you are encouraged to evaluate
 the individual implementations and enable only the ones that meet your
 quality/robustness requirements.
 
-## New Formats
+### New Formats
 
 We welcome PRs to add support for additional image formats.
 
@@ -42,7 +63,6 @@ We welcome PRs to add support for additional image formats.
 | `image` crate version | Compatible `image-extras` versions |
 | --------------------- | ---------------------------------- |
 | 0.25.x                | 0.1.x                              |
-
 
 ## Fuzzing
 
