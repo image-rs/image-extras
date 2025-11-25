@@ -1,10 +1,12 @@
 //! Decoding and encoding DDS images
 //!
-//! DDS (DirectDraw Surface) is a container format for storing DXT (S3TC) compressed images.
+//! DDS (DirectDraw Surface) is a container format for storing uncompressed and
+//! BCn/DXT (S3TC) compressed images for use in graphics applications.
 //!
 //! # Related Links
 //!
 //! * <https://docs.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-pguide> - Description of the DDS format.
+//! * <https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm> - Direct3D 11.3 Functional Specification
 
 use std::io::{Read, Seek};
 
