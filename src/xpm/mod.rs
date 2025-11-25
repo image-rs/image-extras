@@ -73,7 +73,7 @@ struct TextLocation {
 }
 
 /// A peekable reader which tracks location information
-struct TextReader<R: Iterator<Item = u8>> {
+struct TextReader<R> {
     inner: R,
 
     current: Option<u8>,
@@ -127,7 +127,7 @@ where
 /// Helper struct to project BufRead down to Iterator<Item=u8>. Costs of this simple
 /// lifetime-free abstraction include that the struct requires space to store the
 /// error value, and that code using this must eventually check the error field.
-struct IoAdapter<R: BufRead> {
+struct IoAdapter<R> {
     reader: Bytes<R>,
     error: Option<std::io::Error>,
 }
@@ -154,7 +154,7 @@ where
 }
 
 /// XPM decoder
-pub struct XpmDecoder<R: BufRead> {
+pub struct XpmDecoder<R> {
     r: TextReader<IoAdapter<R>>,
     info: XpmHeaderInfo,
 }

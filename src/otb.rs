@@ -185,10 +185,7 @@ impl error::Error for DecoderError {
 }
 
 /// Decoder for Otb images.
-pub struct OtbDecoder<R>
-where
-    R: BufRead + Seek,
-{
+pub struct OtbDecoder<R> {
     reader: R,
     dimensions: (u32, u32),
 }
