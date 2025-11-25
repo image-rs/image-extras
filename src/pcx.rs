@@ -5,7 +5,7 @@
 //! # Related Links
 //! * <https://en.wikipedia.org/wiki/PCX> - The PCX format on Wikipedia
 
-use std::io::{self, BufRead, Seek};
+use std::io::{self, BufRead, Read, Seek};
 use std::iter;
 
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageError, ImageResult};
@@ -13,7 +13,7 @@ use image::{ColorType, ExtendedColorType, ImageDecoder, ImageError, ImageResult}
 /// Decoder for PCX images.
 pub struct PCXDecoder<R>
 where
-    R: BufRead + Seek,
+    R: Read,
 {
     dimensions: (u32, u32),
     inner: pcx::Reader<R>,

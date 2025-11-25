@@ -68,10 +68,7 @@ impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
 }
 
 /// Decoder for Wbmp images.
-pub struct WbmpDecoder<R>
-where
-    R: BufRead + Seek,
-{
+pub struct WbmpDecoder<R> {
     dimensions: (u32, u32),
     inner: wbmp::Decoder<R>,
 }

@@ -197,10 +197,7 @@ fn parse_header(
 }
 
 /// Decoder for SGI (.rgb) images.
-pub struct SgiDecoder<R>
-where
-    R: BufRead,
-{
+pub struct SgiDecoder<R> {
     info: SgiRgbHeaderInfo,
     reader: R,
 }
