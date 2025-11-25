@@ -447,11 +447,7 @@ fn process_data_segment<const DEEP: bool>(
 
     // Add new encoded lines that intersect `segment` to the active set
     while state.cursor < rle_table.len() && rle_table[state.cursor].offset as u64 <= end_pos {
-        rle_table[state.cursor].prec_active_line = if let Some(r) = state.max_active_row {
-            r
-        } else {
-            u32::MAX
-        };
+        rle_table[state.cursor].prec_active_line = state.max_active_row.unwrap_or(u32::MAX);
         state.max_active_row = Some(state.cursor as u32);
         state.cursor += 1;
     }
