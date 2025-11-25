@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn image_without_hotspot() {
         let decoder = XbmDecoder::new(BufReader::new(
-            File::open("tests/images/xbm/1x1.xbm").unwrap(),
+            File::open("tests/decode/xbm/1x1.xbm").unwrap(),
         ))
         .expect("Unable to read XBM file");
 
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn image_with_hotspot() {
         let decoder = XbmDecoder::new(BufReader::new(
-            File::open("tests/images/xbm/hotspot.xbm").unwrap(),
+            File::open("tests/decode/xbm/hotspot.xbm").unwrap(),
         ))
         .expect("Unable to read XBM file");
 

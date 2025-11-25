@@ -14,30 +14,25 @@ use image::error::{
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
 
 /// Encoder for Wbmp images.
-pub struct WbmpEncoder<'a, W> {
-    writer: Option<W>,
-    inner: Option<wbmp::Encoder<'a, W>>,
+pub struct WbmpEncoder<W> {
+    writer: W,
     threshold: u8,
 }
 
-impl<'a, W: Write> WbmpEncoder<'a, W> {
-    pub fn new(writer: W) -> Result<WbmpEncoder<'a, W>, ImageError> {
-        let threshold = 127_u8;
-
-        Ok(WbmpEncoder {
-            writer: Some(writer),
-            inner: None,
-            threshold,
-        })
+impl<W: Write> WbmpEncoder<W> {
+    pub fn new(writer: W) -> Self {
+        Self {
+            writer,
+            threshold: 127,
+        }
     }
-
-    pub fn with_threshold(mut self, threshold: u8) -> WbmpEncoder<'a, W> {
+    pub fn with_threshold(mut self, threshold: u8) -> Self {
         self.threshold = threshold;
         self
     }
 }
 
-impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
+impl<W: Write> ImageEncoder for WbmpEncoder<W> {
     fn write_image(
         mut self,
         buf: &[u8],
@@ -55,15 +50,10 @@ impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
             }
         };
 
-        if let Some(mut inner) = self.inner {
-            inner.encode(buf, width, height, color)
-        } else {
-            let mut writer = self.writer.take().unwrap();
-            let mut encoder = wbmp::Encoder::new(&mut writer);
-            encoder.encode(buf, width, height, color)
-        }
-        .map_err(convert_wbmp_error)?;
-        Ok(())
+        wbmp::Encoder::new(&mut self.writer)
+            .with_threshold(self.threshold)
+            .encode(buf, width, height, color)
+            .map_err(convert_wbmp_error)
     }
 }
 

@@ -29,7 +29,7 @@ image_extras = { version = "0.1", features = ["pcx"], default-features = false }
 | Feature | Format
 | ------- | ------
 | `ora`   | OpenRaster [\[spec\]](https://www.openraster.org/)
-| `otb`   | OTA Bitmap (Over The Air Bitmap) [\[spec\]](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf)
+| `otb`   | OTA Bitmap (Over The Air Bitmap) [\[desc\]](https://en.wikipedia.org/wiki/OTA_bitmap)
 | `pcx`   | PCX (ZSoft Paintbrush bitmap/PiCture eXchange) [\[desc\]](https://en.wikipedia.org/wiki/PCX#PCX_file_format)
 | `sgi`   | SGI (Silicon Graphics Image) [\[spec\]](https://web.archive.org/web/20010413154909/https://reality.sgi.com/grafica/sgiimage.html)
 | `wbmp`  | Wireless Bitmap [\[spec\]](https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf)

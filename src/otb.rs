@@ -3,8 +3,7 @@
 //! OTB (Over The air Bitmap) Format is an image format from Nokia's Smart Messaging specification.
 //!
 //! # Related Links
-//! * <https://en.wikipedia.org/wiki/Wireless_Application_Protocol_Bitmap_Format> - The WBMP format on Wikipedia
-//! * <https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf> - The WAP Specification
+//! * <https://en.wikipedia.org/wiki/OTA_bitmap> - OTA bitmap on Wikipedia
 
 use std::error;
 use std::fmt::{self, Display};
@@ -54,28 +53,27 @@ impl error::Error for EncoderError {
 }
 
 /// Encoder for Otb images.
-pub struct OtbEncoder<'a, W> {
-    writer: &'a mut W,
+pub struct OtbEncoder<W> {
+    writer: W,
     threshold: u8,
 }
 
-impl<'a, W: Write> OtbEncoder<'a, W> {
-    pub fn new(writer: &'a mut W) -> Result<OtbEncoder<'a, W>, ImageError> {
-        Ok(OtbEncoder {
+impl<W: Write> OtbEncoder<W> {
+    pub fn new(writer: W) -> Self {
+        Self {
             writer,
             threshold: 127_u8,
-        })
+        }
     }
-
-    pub fn with_threshold(mut self, threshold: u8) -> OtbEncoder<'a, W> {
+    pub fn with_threshold(mut self, threshold: u8) -> Self {
         self.threshold = threshold;
         self
     }
 }
 
-impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
+impl<W: Write> ImageEncoder for OtbEncoder<W> {
     fn write_image(
-        self,
+        mut self,
         buf: &[u8],
         width: u32,
         height: u32,
@@ -451,7 +449,7 @@ mod test {
             0b00011000, // row8
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
-        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
+        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data);
         encoder
             .write_image(&img_data, 8, 8, image::ExtendedColorType::L8)
             .unwrap();
@@ -489,7 +487,7 @@ mod test {
             0b00000000, 0b00000000, // row9
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
-        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
+        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data);
         encoder
             .write_image(&img_data, 10, 10, image::ExtendedColorType::L8)
             .unwrap();
