@@ -94,32 +94,26 @@ impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
             .write(&[0x00, width as u8, height as u8, 0x01])?;
 
         // Write the encoded image
-        let mut buf_idx = 0;
         let mut current_byte = 0_u8;
         let mut bit = 0;
-        for _y in 0..height {
-            for _x in 0..width {
-                if buf[buf_idx] < self.threshold {
-                    current_byte |= 1 << (7 - bit);
-                }
-                bit += 1;
-                buf_idx += 1;
-                if bit == 8 {
-                    match self.writer.write_all(&[current_byte]) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            return Err(err.into());
-                        }
+        for buf_idx in 0..(width * height) {
+            if buf[buf_idx as usize] < self.threshold {
+                current_byte |= 1 << (7 - bit);
+            }
+            bit += 1;
+            if bit == 8 {
+                match self.writer.write_all(&[current_byte]) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        return Err(err.into());
                     }
-                    current_byte = 0_u8;
-                    bit = 0;
-                };
-            }
-            if bit != 0 {
-                self.writer.write_all(&[current_byte])?;
+                }
+                current_byte = 0_u8;
                 bit = 0;
-                current_byte = 0;
-            }
+            };
+        }
+        if bit != 0 {
+            self.writer.write_all(&[current_byte])?;
         }
 
         Ok(())
@@ -269,37 +263,27 @@ impl<R: BufRead + Seek> ImageDecoder for OtbDecoder<R> {
         if (buf.len() as u32) < (self.dimensions.0 * self.dimensions.1) {
             return Err(DecoderError::InsufficientOutputBuffer.into());
         }
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
 
         // Read entire image data into a buffer
-        let mut byte_buf = Vec::<u8>::with_capacity((buf.len() / 8) + 1);
+        let packed_len = (width * height).div_ceil(8);
+        let mut byte_buf = Vec::<u8>::with_capacity(packed_len);
         let _ = self.reader.read_to_end(&mut byte_buf)?;
 
         // Set a byte in buf for every bit in the image data
-        let mut buf_idx = 0;
-        let mut bytes_idx = 0;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let mut bit = 0;
-        let mut byte = 0;
-        for _y in 0..height {
-            for _x in 0..width {
-                if bit == 0 {
-                    byte = byte_buf[bytes_idx];
-                    bytes_idx += 1;
+        for (i, byte) in byte_buf.into_iter().enumerate() {
+            for bit in 0..8 {
+                let buf_idx = 8 * i + bit;
+                if buf_idx >= buf.len() {
+                    break;
                 }
+
                 buf[buf_idx] = if (byte >> (7 - bit)) & 1 == 0 {
                     0xFF
                 } else {
                     0x00
                 };
-
-                buf_idx += 1;
-                bit += 1;
-
-                if bit == 8 {
-                    bit = 0;
-                }
             }
-            bit = 0;
         }
         Ok(())
     }
@@ -363,18 +347,25 @@ mod test {
             0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, // row8
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // row9
         ];
-        let image_data: [u8; 24] = [
-            0, 10, 10, 1, // headers
-            0b00000000, 0b00000000, // row0
-            0b00001100, 0b00000000, // row1
-            0b00010010, 0b00000000, // row2
-            0b00100001, 0b00000000, // row3
-            0b01000000, 0b10000000, // row4
-            0b01000000, 0b10000000, // row5
-            0b00100001, 0b00000000, // row6
-            0b00010010, 0b00000000, // row7
-            0b00001100, 0b00000000, // row8
-            0b00000000, 0b00000000, // row9
+        #[allow(clippy::unusual_byte_groupings)]
+        let image_data: [u8; 17] = [
+            0,
+            10,
+            10,
+            1, // headers
+            0b_00000000,
+            0b00_000011,
+            0b0000_0001,
+            0b001000_00,
+            0b10000100_,
+            0b_01000000,
+            0b10_010000,
+            0b0010_0010,
+            0b000100_00,
+            0b01001000_,
+            0b_00001100,
+            0b00_000000,
+            0b0000_0000,
         ];
         let decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
         let (width, height) = decoder.dimensions();
@@ -472,18 +463,25 @@ mod test {
             0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, // row8
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // row9
         ];
-        let expected_data: [u8; 24] = [
-            0, 10, 10, 1, // headers
-            0b00000000, 0b00000000, // row0
-            0b00001100, 0b00000000, // row1
-            0b00010010, 0b00000000, // row2
-            0b00100001, 0b00000000, // row3
-            0b01000000, 0b10000000, // row4
-            0b01000000, 0b10000000, // row5
-            0b00100001, 0b00000000, // row6
-            0b00010010, 0b00000000, // row7
-            0b00001100, 0b00000000, // row8
-            0b00000000, 0b00000000, // row9
+        #[allow(clippy::unusual_byte_groupings)]
+        let expected_data: [u8; 17] = [
+            0,
+            10,
+            10,
+            1, // headers
+            0b_00000000,
+            0b00_000011,
+            0b0000_0001,
+            0b001000_00,
+            0b10000100_,
+            0b_01000000,
+            0b10_010000,
+            0b0010_0010,
+            0b000100_00,
+            0b01001000_,
+            0b_00001100,
+            0b00_000000,
+            0b0000_0000,
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
         let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
