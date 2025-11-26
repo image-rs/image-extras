@@ -14,30 +14,26 @@ use image::error::{
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
 
 /// Encoder for Wbmp images.
-pub struct WbmpEncoder<'a, W> {
-    writer: Option<W>,
-    inner: Option<wbmp::Encoder<'a, W>>,
+pub struct WbmpEncoder<W> {
+    writer: W,
     threshold: u8,
 }
 
-impl<'a, W: Write> WbmpEncoder<'a, W> {
-    pub fn new(writer: W) -> Result<WbmpEncoder<'a, W>, ImageError> {
-        let threshold = 127_u8;
-
-        Ok(WbmpEncoder {
-            writer: Some(writer),
-            inner: None,
-            threshold,
-        })
+impl<W: Write> WbmpEncoder<W> {
+    pub fn new(writer: W) -> Self {
+        Self {
+            writer,
+            threshold: 127_u8,
+        }
     }
 
-    pub fn with_threshold(mut self, threshold: u8) -> WbmpEncoder<'a, W> {
+    pub fn with_threshold(mut self, threshold: u8) -> Self {
         self.threshold = threshold;
         self
     }
 }
 
-impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
+impl<W: Write> ImageEncoder for WbmpEncoder<W> {
     fn write_image(
         mut self,
         buf: &[u8],
@@ -49,21 +45,17 @@ impl<'a, W: Write> ImageEncoder for WbmpEncoder<'a, W> {
             ExtendedColorType::L8 => wbmp::ColorType::Luma8,
             ExtendedColorType::Rgba8 => wbmp::ColorType::Rgba8,
             _ => {
-                return Err(ImageError::Encoding(EncodingError::from_format_hint(
-                    ImageFormatHint::Name("Unsupported ColorType".to_string()),
+                return Err(ImageError::Encoding(EncodingError::new(
+                    format_hint(),
+                    "Unsupported ColorType".to_string(),
                 )));
             }
         };
 
-        if let Some(mut inner) = self.inner {
-            inner.encode(buf, width, height, color)
-        } else {
-            let mut writer = self.writer.take().unwrap();
-            let mut encoder = wbmp::Encoder::new(&mut writer);
-            encoder.encode(buf, width, height, color)
-        }
-        .map_err(convert_wbmp_error)?;
-        Ok(())
+        wbmp::Encoder::new(&mut self.writer)
+            .with_threshold(self.threshold)
+            .encode(buf, width, height, color)
+            .map_err(convert_wbmp_error)
     }
 }
 
@@ -86,37 +78,6 @@ where
     }
 }
 
-fn convert_wbmp_error(err: wbmp::error::WbmpError) -> ImageError {
-    use wbmp::error::WbmpError;
-    match err {
-        WbmpError::IoError(inner) => ImageError::IoError(inner),
-        WbmpError::UnsupportedType(inner) => {
-            ImageError::Unsupported(UnsupportedError::from_format_and_kind(
-                ImageFormatHint::Name("WBMP".to_string()),
-                UnsupportedErrorKind::GenericFeature(format!(
-                    "type {} is not supported for wbmp images",
-                    inner
-                )),
-            ))
-        }
-        WbmpError::UnsupportedHeaders => {
-            ImageError::Unsupported(UnsupportedError::from_format_and_kind(
-                ImageFormatHint::Name("WBMP".to_string()),
-                UnsupportedErrorKind::GenericFeature(
-                    "Extension headers are not supported for wbmp images".to_string(),
-                ),
-            ))
-        }
-        WbmpError::InvalidImageData => ImageError::Decoding(DecodingError::from_format_hint(
-            ImageFormatHint::Name("WBMP".to_string()),
-        )),
-        WbmpError::UsageError(inner) => ImageError::Decoding(DecodingError::new(
-            ImageFormatHint::Name("WBMP".to_string()),
-            Box::new(WbmpError::UsageError(inner)),
-        )),
-    }
-}
-
 impl<R: BufRead + Seek> ImageDecoder for WbmpDecoder<R> {
     fn dimensions(&self) -> (u32, u32) {
         self.dimensions
@@ -131,14 +92,42 @@ impl<R: BufRead + Seek> ImageDecoder for WbmpDecoder<R> {
     }
 
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        self.inner
-            .read_image_data(buf)
-            .map_err(convert_wbmp_error)?;
-        Ok(())
+        let (width, height) = self.dimensions;
+        assert_eq!(buf.len(), (width * height) as usize, "Invalid buffer size");
+
+        self.inner.read_image_data(buf).map_err(convert_wbmp_error)
     }
 
     fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)?;
-        Ok(())
+        (*self).read_image(buf)
     }
+}
+
+fn convert_wbmp_error(err: wbmp::error::WbmpError) -> ImageError {
+    use wbmp::error::WbmpError;
+    match err {
+        WbmpError::IoError(inner) => ImageError::IoError(inner),
+        WbmpError::UnsupportedType(inner) => {
+            ImageError::Unsupported(UnsupportedError::from_format_and_kind(
+                format_hint(),
+                UnsupportedErrorKind::GenericFeature(format!(
+                    "type {inner} is not supported for wbmp images"
+                )),
+            ))
+        }
+        WbmpError::UnsupportedHeaders => {
+            ImageError::Unsupported(UnsupportedError::from_format_and_kind(
+                format_hint(),
+                UnsupportedErrorKind::GenericFeature(
+                    "Extension headers are not supported for wbmp images".to_string(),
+                ),
+            ))
+        }
+        WbmpError::InvalidImageData => ImageError::Encoding(EncodingError::new(format_hint(), err)),
+        WbmpError::UsageError(_) => ImageError::Decoding(DecodingError::new(format_hint(), err)),
+    }
+}
+
+fn format_hint() -> ImageFormatHint {
+    ImageFormatHint::Name("WBMP".to_string())
 }
