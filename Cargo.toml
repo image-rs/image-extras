@@ -33,4 +33,5 @@ zip = { version = "5.1.1", default-features = false, features = ["deflate"], opt
 
 [dev-dependencies]
 image = { version = "0.25.8", default-features = false, features = ["png", "tiff"] }
+tempfile = "3.23.0"
 walkdir = "2.5.0"
