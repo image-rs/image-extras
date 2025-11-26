@@ -29,7 +29,7 @@ use image::{ColorType, ExtendedColorType, ImageDecoder, ImageDecoderRect};
 ///
 /// It's possible to set the color type the image is decoded as using
 /// [`DdsDecoder::set_color_type`].
-pub struct DdsDecoder<R: Read> {
+pub struct DdsDecoder<R> {
     inner: Decoder<R>,
     is_cubemap: bool,
     size: Size,
@@ -115,7 +115,6 @@ impl<R: Read> DdsDecoder<R> {
     /// for decoding DDS files. If these color types (or other unsupported types)
     /// are provided, this function will return [`ImageError::Unsupported`] with
     /// [`UnsupportedErrorKind::Color`].
-    #[track_caller]
     pub fn set_color_type(&mut self, color: ColorType) -> ImageResult<()> {
         let Some(supported_color) = SupportedColor::from_image_exact(color) else {
             return Err(ImageError::Unsupported(
