@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.89.0" # MSRV Policy: N-2
 license = "MIT OR Apache-2.0"
-publish = false
+description = "Additional image format decoders for the image crate"
+repository = "https://github.com/image-rs/image-extras"
 
-include = ["src", "tests/reference.rs"]
+include = ["src", "LICENSE-APACHE", "LICENSE-MIT", "README.md"]
 
 [features]
 default = ["ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
