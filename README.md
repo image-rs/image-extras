@@ -28,6 +28,7 @@ image_extras = { version = "0.1", features = ["pcx"], default-features = false }
 
 | Feature | Format
 | ------- | ------
+| `icns`  | ICNS [\[desc\]](https://en.wikipedia.org/wiki/Apple_Icon_Image_format)
 | `ora`   | OpenRaster [\[spec\]](https://www.openraster.org/)
 | `otb`   | OTA Bitmap (Over The Air Bitmap) [\[desc\]](https://en.wikipedia.org/wiki/OTA_bitmap)
 | `pcx`   | PCX (ZSoft Paintbrush bitmap/PiCture eXchange) [\[desc\]](https://en.wikipedia.org/wiki/PCX#PCX_file_format)

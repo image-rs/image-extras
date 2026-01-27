@@ -10,10 +10,11 @@ repository = "https://github.com/image-rs/image-extras"
 include = ["src", "LICENSE-APACHE", "LICENSE-MIT", "README.md"]
 
 [features]
-default = ["ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
+default = ["icns", "ora", "otb", "pcx", "sgi", "xbm", "xpm", "wbmp"]
 
 # Each feature below is the file extension for the file format encoder/decoder
 # it enables.
+icns = ["dep:png", "dep:icns"]
 ora = ["image/png", "dep:zip", "dep:ouroboros"]
 otb = []
 sgi = []
@@ -27,8 +28,10 @@ xpm = []
 image = { version = "0.25.8", default-features = false }
 
 # Optional dependencies
+icns = { version = "0.4.0", default-features = false, optional = true }
 ouroboros = { version = "0.18.5", optional = true }
 pcx = { version = "0.2.4", optional = true }
+png = { version = "0.18.0", default-features = false, optional = true }
 wbmp = { version = "0.1.2", optional = true }
 zip = { version = "5.1.1", default-features = false, features = ["deflate"], optional = true }
 
