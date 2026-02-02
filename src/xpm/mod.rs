@@ -886,7 +886,7 @@ fn read_xpm_palette<R: Iterator<Item = u8>>(
     }
 
     // Sort table and check for duplicates
-    color_table.sort_unstable_by(|x, y| x.code.cmp(&y.code));
+    color_table.sort_unstable_by_key(|x| x.code);
     for w in color_table.windows(2) {
         if w[0].code.cmp(&w[1].code) != Ordering::Less {
             return Err(XpmDecodeError::DuplicateCode);
