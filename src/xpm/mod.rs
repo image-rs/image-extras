@@ -329,7 +329,7 @@ fn fold_to_lower(x: u8) -> u8 {
 /// Read a C keyword into the buffer and returns a slice of the buffer for the
 /// keyword.
 ///
-/// The only allowed characters are a-z, A-Z, 0-9, and _. Reading will stop if
+/// The only allowed characters are a-z, A-Z, and _. Reading will stop if
 /// a non-allowed character or EOF is reached. If the buffer is too small, an
 /// error will be returned.
 fn read_keyword<'buf, R: Iterator<Item = u8>>(
@@ -340,7 +340,7 @@ fn read_keyword<'buf, R: Iterator<Item = u8>>(
     let mut len = 0;
 
     while let Some(b) = r.peek() {
-        if valid_name_char(b) {
+        if matches!(b, b'_' | b'a'..=b'z' | b'A'..=b'Z') {
             if len >= buf.len() {
                 // identifier too long
                 return Err(XpmDecodeError::Parse(part, r.loc()));
@@ -711,7 +711,11 @@ fn read_xpm_header<R: Iterator<Item = u8>>(
     read_fixed_string(r, b"static", XpmPart::ArrayStart)?;
     skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
 
-    // there may be an optional "const" keyword before "char"
+    // There may be an optional "const" keyword before "char".
+    // This is NOT part of the XPM 3 specification.
+    // This was added by ImageMagick 7.1.0-4 in mid 2021
+    // (https://github.com/ImageMagick/ImageMagick/commit/e7d3e182b72ff9b2c3ea1c9aa0f14d69cc968ba7)
+    // to help with C++ compiler warnings (https://github.com/ImageMagick/ImageMagick/issues/3951).
     let keyword = read_keyword(r, keyword_buf, XpmPart::ArrayStart)?;
     match keyword {
         b"const" => {
