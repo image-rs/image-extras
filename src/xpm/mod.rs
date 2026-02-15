@@ -326,6 +326,35 @@ fn fold_to_lower(x: u8) -> u8 {
     }
 }
 
+/// Read a C keyword into the buffer and returns a slice of the buffer for the
+/// keyword.
+///
+/// The only allowed characters are a-z, A-Z, 0-9, and _. Reading will stop if
+/// a non-allowed character or EOF is reached. If the buffer is too small, an
+/// error will be returned.
+fn read_keyword<'buf, R: Iterator<Item = u8>>(
+    r: &mut TextReader<R>,
+    buf: &'buf mut [u8],
+    part: XpmPart,
+) -> Result<&'buf [u8], XpmDecodeError> {
+    let mut len = 0;
+
+    while let Some(b) = r.peek() {
+        if valid_name_char(b) {
+            if len >= buf.len() {
+                // identifier too long
+                return Err(XpmDecodeError::Parse(part, r.loc()));
+            }
+            buf[len] = b;
+            len += 1;
+            r.next();
+        } else {
+            break;
+        }
+    }
+
+    Ok(&buf[..len])
+}
 /// Read precisely the string `s` from `r`, or error.
 fn read_fixed_string<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
@@ -421,6 +450,18 @@ fn skip_whitespace_and_comments<R: Iterator<Item = u8>>(
     }
 
     Ok(nbytes)
+}
+
+/// Skips at least one whitespace or comment.
+fn skip_non_empty_whitespace_and_comments<R: Iterator<Item = u8>>(
+    r: &mut TextReader<R>,
+    part: XpmPart,
+) -> Result<(), XpmDecodeError> {
+    let spaces = skip_whitespace_and_comments(r, part)?;
+    if spaces == 0 {
+        return Err(XpmDecodeError::Parse(part, r.loc()));
+    }
+    Ok(())
 }
 
 fn skip_spaces_and_tabs<R: Iterator<Item = u8>>(
@@ -660,17 +701,27 @@ fn parse_color(data: &[u8]) -> Result<[u16; 4], XpmDecodeError> {
 fn read_xpm_header<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
 ) -> Result<XpmHeaderInfo, XpmDecodeError> {
+    let keyword_buf = &mut [0u8; 16];
+
     // Note: XPM3 header is `/* XPM */`
     read_fixed_string(r, b"/* XPM */", XpmPart::Header)?;
     read_to_newline(r, XpmPart::Header)?;
 
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
     read_fixed_string(r, b"static", XpmPart::ArrayStart)?;
-    if skip_whitespace_and_comments(r, XpmPart::ArrayStart)? == 0 {
-        /* need a space or other char between 'static' and 'char' */
-        return Err(XpmDecodeError::Parse(XpmPart::ArrayStart, r.loc()));
+    skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
+
+    // there may be an optional "const" keyword before "char"
+    let keyword = read_keyword(r, keyword_buf, XpmPart::ArrayStart)?;
+    match keyword {
+        b"const" => {
+            skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
+            read_fixed_string(r, b"char", XpmPart::ArrayStart)?;
+        }
+        b"char" => (),
+        _ => return Err(XpmDecodeError::Parse(XpmPart::ArrayStart, r.loc())),
     }
-    read_fixed_string(r, b"char", XpmPart::ArrayStart)?;
+
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
     read_fixed_string(r, b"*", XpmPart::ArrayStart)?;
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
