@@ -14,6 +14,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "icns")]
+pub mod icns;
+
 #[cfg(feature = "ora")]
 pub mod ora;
 
@@ -46,6 +49,19 @@ static REGISTER: std::sync::Once = std::sync::Once::new();
 /// effect.
 pub fn register() {
     REGISTER.call_once(|| {
+        #[cfg(feature = "icns")]
+        if register_decoding_hook(
+            "icns".into(),
+            Box::new(|r| {
+                Ok(Box::new(icns::IcnsDecoder::new_with_decode_func(
+                    r,
+                    Box::new(icns::decode_jpeg2000_using_hook),
+                )?))
+            }),
+        ) {
+            register_format_detection_hook("icns".into(), b"icns", None);
+        }
+
         // OpenRaster images are ZIP files and have no simple signature to distinguish them
         // from ZIP files containing other content
         #[cfg(feature = "ora")]

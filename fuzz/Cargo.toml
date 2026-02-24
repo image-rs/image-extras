@@ -23,8 +23,20 @@ version = "0.4"
 members = ["."]
 
 [[bin]]
+name = "fuzzer_script_icns"
+path = "fuzzers/fuzzer_script_icns.rs"
+
+[[bin]]
+name = "fuzzer_script_ora"
+path = "fuzzers/fuzzer_script_ora.rs"
+
+[[bin]]
 name = "fuzzer_script_pcx"
 path = "fuzzers/fuzzer_script_pcx.rs"
+
+[[bin]]
+name = "fuzzer_script_sgi"
+path = "fuzzers/fuzzer_script_sgi.rs"
 
 [[bin]]
 name = "fuzzer_script_xbm"
@@ -33,11 +45,3 @@ path = "fuzzers/fuzzer_script_xbm.rs"
 [[bin]]
 name = "fuzzer_script_xpm"
 path = "fuzzers/fuzzer_script_xpm.rs"
-
-[[bin]]
-name = "fuzzer_script_ora"
-path = "fuzzers/fuzzer_script_ora.rs"
-
-[[bin]]
-name = "fuzzer_script_sgi"
-path = "fuzzers/fuzzer_script_sgi.rs"
