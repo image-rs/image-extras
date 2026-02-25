@@ -27,7 +27,7 @@ struct TextLocation {
 }
 
 /// A peekable reader which tracks location information
-struct TextReader<R: Iterator<Item = u8>> {
+struct TextReader<R> {
     inner: R,
 
     current: Option<u8>,
@@ -89,7 +89,7 @@ struct XbmHeaderData {
 ///
 /// To properly validate the image trailer, invoke `next_byte()` again after reading the last byte of content; if
 /// the trailer is valid it should return Ok(None).
-struct XbmStreamDecoder<R: Iterator<Item = u8>> {
+struct XbmStreamDecoder<R> {
     r: TextReader<R>,
     current_position: u64,
     // Note: technically this includes header metadata that isn't _needed_ when parsing
@@ -99,7 +99,7 @@ struct XbmStreamDecoder<R: Iterator<Item = u8>> {
 /// Helper struct to project BufRead down to Iterator<Item=u8>. Costs of this simple
 /// lifetime-free abstraction include that the struct requires space to store the
 /// error value, and that code using this must eventually check the error field.
-struct IoAdapter<R: BufRead> {
+struct IoAdapter<R> {
     reader: Bytes<R>,
     error: Option<std::io::Error>,
 }
@@ -126,7 +126,7 @@ where
 }
 
 /// XBM decoder (usable wrapper of XbmStreamDecoder that handles IO errors)
-pub struct XbmDecoder<R: BufRead> {
+pub struct XbmDecoder<R> {
     base: XbmStreamDecoder<IoAdapter<R>>,
 }
 

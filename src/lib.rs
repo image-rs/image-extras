@@ -17,6 +17,9 @@
 #[cfg(feature = "dds")]
 pub mod dds;
 
+#[cfg(feature = "icns")]
+pub mod icns;
+
 #[cfg(feature = "ora")]
 pub mod ora;
 
@@ -55,6 +58,19 @@ pub fn register() {
             Box::new(|r| Ok(Box::new(dds::DdsDecoder::new(r)?))),
         ) {
             register_format_detection_hook("dds".into(), b"DDS ", None);
+        }
+
+        #[cfg(feature = "icns")]
+        if register_decoding_hook(
+            "icns".into(),
+            Box::new(|r| {
+                Ok(Box::new(icns::IcnsDecoder::new_with_decode_func(
+                    r,
+                    Box::new(icns::decode_jpeg2000_using_hook),
+                )?))
+            }),
+        ) {
+            register_format_detection_hook("icns".into(), b"icns", None);
         }
 
         // OpenRaster images are ZIP files and have no simple signature to distinguish them

@@ -3,10 +3,9 @@
 //! OTB (Over The air Bitmap) Format is an image format from Nokia's Smart Messaging specification.
 //!
 //! # Related Links
-//! * <https://en.wikipedia.org/wiki/Wireless_Application_Protocol_Bitmap_Format> - The WBMP format on Wikipedia
-//! * <https://www.wapforum.org/what/technical/SPEC-WAESpec-19990524.pdf> - The WAP Specification
+//! * <https://en.wikipedia.org/wiki/OTA_bitmap> - OTA bitmap on Wikipedia
+//! * <https://web.archive.org/web/20151028024229/https://www.csoft.co.uk/documents/sms3_0_0.pdf> - Specification
 
-use std::error;
 use std::fmt::{self, Display};
 use std::io::{BufRead, Seek, Write};
 
@@ -35,6 +34,7 @@ impl Display for EncoderError {
         }
     }
 }
+impl std::error::Error for EncoderError {}
 
 impl From<EncoderError> for ImageError {
     fn from(e: EncoderError) -> ImageError {
@@ -47,35 +47,29 @@ impl From<EncoderError> for ImageError {
     }
 }
 
-impl error::Error for EncoderError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-}
-
 /// Encoder for Otb images.
-pub struct OtbEncoder<'a, W> {
-    writer: &'a mut W,
+pub struct OtbEncoder<W> {
+    writer: W,
     threshold: u8,
 }
 
-impl<'a, W: Write> OtbEncoder<'a, W> {
-    pub fn new(writer: &'a mut W) -> Result<OtbEncoder<'a, W>, ImageError> {
-        Ok(OtbEncoder {
+impl<W: Write> OtbEncoder<W> {
+    pub fn new(writer: W) -> Self {
+        Self {
             writer,
             threshold: 127_u8,
-        })
+        }
     }
 
-    pub fn with_threshold(mut self, threshold: u8) -> OtbEncoder<'a, W> {
+    pub fn with_threshold(mut self, threshold: u8) -> Self {
         self.threshold = threshold;
         self
     }
 }
 
-impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
+impl<W: Write> ImageEncoder for OtbEncoder<W> {
     fn write_image(
-        self,
+        mut self,
         buf: &[u8],
         width: u32,
         height: u32,
@@ -94,32 +88,21 @@ impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
             .write(&[0x00, width as u8, height as u8, 0x01])?;
 
         // Write the encoded image
-        let mut buf_idx = 0;
         let mut current_byte = 0_u8;
         let mut bit = 0;
-        for _y in 0..height {
-            for _x in 0..width {
-                if buf[buf_idx] < self.threshold {
-                    current_byte |= 1 << (7 - bit);
-                }
-                bit += 1;
-                buf_idx += 1;
-                if bit == 8 {
-                    match self.writer.write_all(&[current_byte]) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            return Err(err.into());
-                        }
-                    }
-                    current_byte = 0_u8;
-                    bit = 0;
-                };
+        for buf_idx in 0..(width * height) {
+            if buf[buf_idx as usize] < self.threshold {
+                current_byte |= 1 << (7 - bit);
             }
-            if bit != 0 {
+            bit += 1;
+            if bit == 8 {
                 self.writer.write_all(&[current_byte])?;
+                current_byte = 0_u8;
                 bit = 0;
-                current_byte = 0;
-            }
+            };
+        }
+        if bit != 0 {
+            self.writer.write_all(&[current_byte])?;
         }
 
         Ok(())
@@ -129,48 +112,31 @@ impl<'a, W: Write> ImageEncoder for OtbEncoder<'a, W> {
 /// All errors that can occur when attempting to parse an OTB image
 #[derive(Debug, Clone)]
 enum DecoderError {
-    /// OTB image headers are malformed or invalid
-    InvalidHeader(InvalidHeaderKind),
-
-    /// Output buffer could not accommodate the image data
-    InsufficientOutputBuffer,
-}
-
-#[derive(Debug, Clone)]
-enum InvalidHeaderKind {
     /// Info field in OTB image headers is unsupported
     UnsupportedInfoField(u8),
-
     /// Width in OTB image headers is zero
     WidthZero,
-
     /// Height in OTB image headers is zero
     HeightZero,
-
     /// Specified color depth is not supported
-    UnsupportedDepth(u8),
+    UnsupportedColorDepth(u8),
 }
 
 impl Display for DecoderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DecoderError::InvalidHeader(kind) => match kind {
-                InvalidHeaderKind::UnsupportedInfoField(info) => {
-                    f.write_fmt(format_args!("Unsupported value in info field {:08b}", info))
-                }
-                InvalidHeaderKind::WidthZero => f.write_fmt(format_args!("Width cannot be zero")),
-                InvalidHeaderKind::HeightZero => f.write_fmt(format_args!("Height cannot be zero")),
-                InvalidHeaderKind::UnsupportedDepth(depth) => f.write_fmt(format_args!(
-                    "Unsupported color depth value in headers {}",
-                    depth
-                )),
-            },
-            DecoderError::InsufficientOutputBuffer => f.write_fmt(format_args!(
-                "Specified output buffer is insuffient for decoded image data"
+            Self::UnsupportedInfoField(info) => {
+                f.write_fmt(format_args!("Unsupported value in info field {info:08b}"))
+            }
+            Self::WidthZero => f.write_fmt(format_args!("Width cannot be zero")),
+            Self::HeightZero => f.write_fmt(format_args!("Height cannot be zero")),
+            Self::UnsupportedColorDepth(depth) => f.write_fmt(format_args!(
+                "Unsupported color depth value in headers {depth}"
             )),
         }
     }
 }
+impl std::error::Error for DecoderError {}
 
 impl From<DecoderError> for ImageError {
     fn from(e: DecoderError) -> ImageError {
@@ -178,17 +144,8 @@ impl From<DecoderError> for ImageError {
     }
 }
 
-impl error::Error for DecoderError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-}
-
 /// Decoder for Otb images.
-pub struct OtbDecoder<R>
-where
-    R: BufRead + Seek,
-{
+pub struct OtbDecoder<R> {
     reader: R,
     dimensions: (u32, u32),
 }
@@ -212,41 +169,29 @@ where
     }
 
     fn read_metadata(&mut self) -> Result<(), ImageError> {
+        let mut header_buf = [0_u8; 4];
+        self.reader.read_exact(&mut header_buf)?;
+
+        let [info_field, width, height, depth] = header_buf;
+
         // InfoField - 00 for single byte width/height values
-        let info_field_buf: &mut [u8; 1] = &mut [0; 1];
-        self.reader.read_exact(info_field_buf)?;
-        let info_field = info_field_buf[0];
         if info_field != 0 {
-            return Err(
-                DecoderError::InvalidHeader(InvalidHeaderKind::UnsupportedInfoField(info_field))
-                    .into(),
-            );
+            return Err(DecoderError::UnsupportedInfoField(info_field).into());
         }
 
         // Width
-        let width_buf: &mut [u8; 1] = &mut [0; 1];
-        self.reader.read_exact(width_buf)?;
-        let width = width_buf[0];
         if width == 0 {
-            return Err(DecoderError::InvalidHeader(InvalidHeaderKind::WidthZero).into());
+            return Err(DecoderError::WidthZero.into());
         }
 
         // Height
-        let height_buf: &mut [u8; 1] = &mut [0; 1];
-        self.reader.read_exact(height_buf)?;
-        let height = height_buf[0];
         if height == 0 {
-            return Err(DecoderError::InvalidHeader(InvalidHeaderKind::HeightZero).into());
+            return Err(DecoderError::HeightZero.into());
         }
 
         // Depth
-        let depth_buf: &mut [u8; 1] = &mut [0; 1];
-        self.reader.read_exact(depth_buf)?;
-        let depth = depth_buf[0];
         if depth != 1 {
-            return Err(
-                DecoderError::InvalidHeader(InvalidHeaderKind::UnsupportedDepth(depth)).into(),
-            );
+            return Err(DecoderError::UnsupportedColorDepth(depth).into());
         }
 
         self.dimensions = (width as u32, height as u32);
@@ -269,47 +214,34 @@ impl<R: BufRead + Seek> ImageDecoder for OtbDecoder<R> {
     }
 
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        if (buf.len() as u32) < (self.dimensions.0 * self.dimensions.1) {
-            return Err(DecoderError::InsufficientOutputBuffer.into());
-        }
+        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
+
+        assert_eq!(buf.len(), width * height, "Invalid buffer length");
 
         // Read entire image data into a buffer
-        let mut byte_buf = Vec::<u8>::with_capacity((buf.len() / 8) + 1);
-        let _ = self.reader.read_to_end(&mut byte_buf)?;
+        let mut byte_buf = vec![0_u8; (width * height).div_ceil(8)].into_boxed_slice();
+        self.reader.read_exact(&mut byte_buf)?;
 
         // Set a byte in buf for every bit in the image data
-        let mut buf_idx = 0;
-        let mut bytes_idx = 0;
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
-        let mut bit = 0;
-        let mut byte = 0;
-        for _y in 0..height {
-            for _x in 0..width {
-                if bit == 0 {
-                    byte = byte_buf[bytes_idx];
-                    bytes_idx += 1;
+        for (i, &byte) in byte_buf.iter().enumerate() {
+            for bit in 0..8 {
+                let buf_idx = 8 * i + bit;
+                if buf_idx >= buf.len() {
+                    break;
                 }
+
                 buf[buf_idx] = if (byte >> (7 - bit)) & 1 == 0 {
                     0xFF
                 } else {
                     0x00
                 };
-
-                buf_idx += 1;
-                bit += 1;
-
-                if bit == 8 {
-                    bit = 0;
-                }
             }
-            bit = 0;
         }
         Ok(())
     }
 
     fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)?;
-        Ok(())
+        (*self).read_image(buf)
     }
 }
 
@@ -366,18 +298,25 @@ mod test {
             0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, // row8
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // row9
         ];
-        let image_data: [u8; 24] = [
-            0, 10, 10, 1, // headers
-            0b00000000, 0b00000000, // row0
-            0b00001100, 0b00000000, // row1
-            0b00010010, 0b00000000, // row2
-            0b00100001, 0b00000000, // row3
-            0b01000000, 0b10000000, // row4
-            0b01000000, 0b10000000, // row5
-            0b00100001, 0b00000000, // row6
-            0b00010010, 0b00000000, // row7
-            0b00001100, 0b00000000, // row8
-            0b00000000, 0b00000000, // row9
+        #[allow(clippy::unusual_byte_groupings)]
+        let image_data: [u8; 17] = [
+            0,
+            10,
+            10,
+            1, // headers
+            0b_00000000,
+            0b00_000011,
+            0b0000_0001,
+            0b001000_00,
+            0b10000100_,
+            0b_01000000,
+            0b10_010000,
+            0b0010_0010,
+            0b000100_00,
+            0b01001000_,
+            0b_00001100,
+            0b00_000000,
+            0b0000_0000,
         ];
         let decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
         let (width, height) = decoder.dimensions();
@@ -451,7 +390,7 @@ mod test {
             0b00011000, // row8
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
-        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
+        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data);
         encoder
             .write_image(&img_data, 8, 8, image::ExtendedColorType::L8)
             .unwrap();
@@ -475,21 +414,28 @@ mod test {
             0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, // row8
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // row9
         ];
-        let expected_data: [u8; 24] = [
-            0, 10, 10, 1, // headers
-            0b00000000, 0b00000000, // row0
-            0b00001100, 0b00000000, // row1
-            0b00010010, 0b00000000, // row2
-            0b00100001, 0b00000000, // row3
-            0b01000000, 0b10000000, // row4
-            0b01000000, 0b10000000, // row5
-            0b00100001, 0b00000000, // row6
-            0b00010010, 0b00000000, // row7
-            0b00001100, 0b00000000, // row8
-            0b00000000, 0b00000000, // row9
+        #[allow(clippy::unusual_byte_groupings)]
+        let expected_data: [u8; 17] = [
+            0,
+            10,
+            10,
+            1, // headers
+            0b_00000000,
+            0b00_000011,
+            0b0000_0001,
+            0b001000_00,
+            0b10000100_,
+            0b_01000000,
+            0b10_010000,
+            0b0010_0010,
+            0b000100_00,
+            0b01001000_,
+            0b_00001100,
+            0b00_000000,
+            0b0000_0000,
         ];
         let mut encoded_data = Vec::<u8>::with_capacity(expected_data.len());
-        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data).unwrap();
+        let encoder = crate::otb::OtbEncoder::new(&mut encoded_data);
         encoder
             .write_image(&img_data, 10, 10, image::ExtendedColorType::L8)
             .unwrap();

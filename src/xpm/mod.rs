@@ -73,7 +73,7 @@ struct TextLocation {
 }
 
 /// A peekable reader which tracks location information
-struct TextReader<R: Iterator<Item = u8>> {
+struct TextReader<R> {
     inner: R,
 
     current: Option<u8>,
@@ -127,7 +127,7 @@ where
 /// Helper struct to project BufRead down to Iterator<Item=u8>. Costs of this simple
 /// lifetime-free abstraction include that the struct requires space to store the
 /// error value, and that code using this must eventually check the error field.
-struct IoAdapter<R: BufRead> {
+struct IoAdapter<R> {
     reader: Bytes<R>,
     error: Option<std::io::Error>,
 }
@@ -154,7 +154,7 @@ where
 }
 
 /// XPM decoder
-pub struct XpmDecoder<R: BufRead> {
+pub struct XpmDecoder<R> {
     r: TextReader<IoAdapter<R>>,
     info: XpmHeaderInfo,
 }
@@ -326,6 +326,35 @@ fn fold_to_lower(x: u8) -> u8 {
     }
 }
 
+/// Read a C keyword into the buffer and returns a slice of the buffer for the
+/// keyword.
+///
+/// The only allowed characters are a-z, A-Z, and _. Reading will stop if
+/// a non-allowed character or EOF is reached. If the buffer is too small, an
+/// error will be returned.
+fn read_keyword<'buf, R: Iterator<Item = u8>>(
+    r: &mut TextReader<R>,
+    buf: &'buf mut [u8],
+    part: XpmPart,
+) -> Result<&'buf [u8], XpmDecodeError> {
+    let mut len = 0;
+
+    while let Some(b) = r.peek() {
+        if matches!(b, b'_' | b'a'..=b'z' | b'A'..=b'Z') {
+            if len >= buf.len() {
+                // identifier too long
+                return Err(XpmDecodeError::Parse(part, r.loc()));
+            }
+            buf[len] = b;
+            len += 1;
+            r.next();
+        } else {
+            break;
+        }
+    }
+
+    Ok(&buf[..len])
+}
 /// Read precisely the string `s` from `r`, or error.
 fn read_fixed_string<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
@@ -421,6 +450,18 @@ fn skip_whitespace_and_comments<R: Iterator<Item = u8>>(
     }
 
     Ok(nbytes)
+}
+
+/// Skips at least one whitespace or comment.
+fn skip_non_empty_whitespace_and_comments<R: Iterator<Item = u8>>(
+    r: &mut TextReader<R>,
+    part: XpmPart,
+) -> Result<(), XpmDecodeError> {
+    let spaces = skip_whitespace_and_comments(r, part)?;
+    if spaces == 0 {
+        return Err(XpmDecodeError::Parse(part, r.loc()));
+    }
+    Ok(())
 }
 
 fn skip_spaces_and_tabs<R: Iterator<Item = u8>>(
@@ -660,17 +701,31 @@ fn parse_color(data: &[u8]) -> Result<[u16; 4], XpmDecodeError> {
 fn read_xpm_header<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
 ) -> Result<XpmHeaderInfo, XpmDecodeError> {
+    let keyword_buf = &mut [0u8; 16];
+
     // Note: XPM3 header is `/* XPM */`
     read_fixed_string(r, b"/* XPM */", XpmPart::Header)?;
     read_to_newline(r, XpmPart::Header)?;
 
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
     read_fixed_string(r, b"static", XpmPart::ArrayStart)?;
-    if skip_whitespace_and_comments(r, XpmPart::ArrayStart)? == 0 {
-        /* need a space or other char between 'static' and 'char' */
-        return Err(XpmDecodeError::Parse(XpmPart::ArrayStart, r.loc()));
+    skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
+
+    // There may be an optional "const" keyword before "char".
+    // This is NOT part of the XPM 3 specification.
+    // This was added by ImageMagick 7.1.0-4 in mid 2021
+    // (https://github.com/ImageMagick/ImageMagick/commit/e7d3e182b72ff9b2c3ea1c9aa0f14d69cc968ba7)
+    // to help with C++ compiler warnings (https://github.com/ImageMagick/ImageMagick/issues/3951).
+    let keyword = read_keyword(r, keyword_buf, XpmPart::ArrayStart)?;
+    match keyword {
+        b"const" => {
+            skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
+            read_fixed_string(r, b"char", XpmPart::ArrayStart)?;
+        }
+        b"char" => (),
+        _ => return Err(XpmDecodeError::Parse(XpmPart::ArrayStart, r.loc())),
     }
-    read_fixed_string(r, b"char", XpmPart::ArrayStart)?;
+
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
     read_fixed_string(r, b"*", XpmPart::ArrayStart)?;
     skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
@@ -886,7 +941,7 @@ fn read_xpm_palette<R: Iterator<Item = u8>>(
     }
 
     // Sort table and check for duplicates
-    color_table.sort_unstable_by(|x, y| x.code.cmp(&y.code));
+    color_table.sort_unstable_by_key(|x| x.code);
     for w in color_table.windows(2) {
         if w[0].code.cmp(&w[1].code) != Ordering::Less {
             return Err(XpmDecodeError::DuplicateCode);
