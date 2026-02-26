@@ -14,6 +14,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "dds")]
+pub mod dds;
+
 #[cfg(feature = "icns")]
 pub mod icns;
 
@@ -49,6 +52,14 @@ static REGISTER: std::sync::Once = std::sync::Once::new();
 /// effect.
 pub fn register() {
     REGISTER.call_once(|| {
+        #[cfg(feature = "dds")]
+        if register_decoding_hook(
+            "dds".into(),
+            Box::new(|r| Ok(Box::new(dds::DdsDecoder::new(r)?))),
+        ) {
+            register_format_detection_hook("dds".into(), b"DDS ", None);
+        }
+
         #[cfg(feature = "icns")]
         if register_decoding_hook(
             "icns".into(),

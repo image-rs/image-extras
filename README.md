@@ -28,6 +28,7 @@ image_extras = { version = "0.1", features = ["pcx"], default-features = false }
 
 | Feature | Format
 | ------- | ------
+| `dds`   | DirectDraw Surface [\[spec\]](https://docs.microsoft.com/en-us/windows/win32/direct3ddds/dx-graphics-dds-pguide)
 | `icns`  | ICNS [\[desc\]](https://en.wikipedia.org/wiki/Apple_Icon_Image_format)
 | `ora`   | OpenRaster [\[spec\]](https://www.openraster.org/)
 | `otb`   | OTA Bitmap (Over The Air Bitmap) [\[desc\]](https://en.wikipedia.org/wiki/OTA_bitmap)
