@@ -278,28 +278,6 @@ pub struct IcnsDecoder<R> {
     jp2: SubformatDecodeFn,
 }
 
-/// Move forward in the reader by `skip` bytes.
-///
-/// Seeking forward a type implementing Read + Seek can be surprisingly inefficient
-/// for typical implementations; for example, BufReader will by default discard and
-/// reload its entire buffer every time it seeks forward, even if the seek is very short.
-///
-/// To avoid reading many more bytes than necessary, this function reads if the skip
-/// amount is small, and seeks if it is large.
-fn seek_or_read_forward<R>(reader: &mut R, skip: u32) -> Result<(), std::io::Error>
-where
-    R: Read + Seek,
-{
-    const READ_LEN: usize = 512;
-    if skip as usize <= READ_LEN {
-        let mut tmp = [0u8; READ_LEN];
-        reader.read_exact(&mut tmp[..skip as usize])?;
-    } else {
-        reader.seek(SeekFrom::Current(skip as i64))?;
-    }
-    Ok(())
-}
-
 /// Read the data from the reader for the stream position range `start..start + len`
 fn read_vec_at<R>(reader: &mut R, start: u64, len: u32) -> Result<Vec<u8>, std::io::Error>
 where
@@ -380,7 +358,7 @@ where
                 return Err(DecoderError::IncompleteEntry.into());
             }
             if cur_pos < end {
-                seek_or_read_forward(&mut reader, data_len)?;
+                reader.seek_relative(data_len as i64)?;
             }
             cur_pos += entry_len as u64;
 
