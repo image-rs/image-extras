@@ -261,6 +261,7 @@ struct SgiRgbDecodeState {
 /** Apply a byte of the input to a scanline state machine.
  * Returns `Ok(true)` if this byte completes an end of line marker.
  * Returns Err(true) on line overflow, Err(false) on line underflow. */
+#[inline]
 fn apply_rle16_byte(
     row: &mut SgiRgbScanlineState,
     buf_row: &mut [u8],
@@ -332,6 +333,7 @@ fn apply_rle16_byte(
 /** Apply a byte of the input to a scanline state machine.
  * Returns Ok(true) if this byte completes an end of line marker.
  * Returns Err(true) on line overflow, Err(false) on line underflow. */
+#[inline]
 fn apply_rle8_byte(
     row: &mut SgiRgbScanlineState,
     buf_row: &mut [u8],
