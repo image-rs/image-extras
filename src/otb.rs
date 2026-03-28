@@ -169,27 +169,43 @@ where
     }
 
     fn read_metadata(&mut self) -> Result<(), ImageError> {
-        let mut header_buf = [0_u8; 4];
-        self.reader.read_exact(&mut header_buf)?;
+        let mut buf = [0_u8; 1];
 
-        let [info_field, width, height, depth] = header_buf;
+        self.reader.read_exact(&mut buf)?;
+        let info_field = buf[0];
 
-        // InfoField - 00 for single byte width/height values
-        if info_field != 0 {
+        // InfoField
+        // 00 for u8 width/height values
+        // 10 for u16 values
+        if info_field != 0x0 && info_field != 0x10 {
             return Err(DecoderError::UnsupportedInfoField(info_field).into());
         }
 
         // Width
+        self.reader.read_exact(&mut buf)?;
+        let mut width = buf[0] as u16;
+        if info_field == 0x10 {
+            self.reader.read_exact(&mut buf)?;
+            width = width << 8 | buf[0] as u16;
+        }
         if width == 0 {
             return Err(DecoderError::WidthZero.into());
         }
 
         // Height
+        self.reader.read_exact(&mut buf)?;
+        let mut height = buf[0] as u16;
+        if info_field == 0x10 {
+            self.reader.read_exact(&mut buf)?;
+            height = height << 8 | buf[0] as u16;
+        }
         if height == 0 {
             return Err(DecoderError::HeightZero.into());
         }
 
         // Depth
+        self.reader.read_exact(&mut buf)?;
+        let depth = buf[0];
         if depth != 1 {
             return Err(DecoderError::UnsupportedColorDepth(depth).into());
         }
