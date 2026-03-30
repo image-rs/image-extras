@@ -14,16 +14,16 @@ use image::codecs::png::PngDecoder;
 use image::error::{DecodingError, ImageFormatHint, UnsupportedError};
 use image::metadata::Orientation;
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageError, ImageResult, Limits};
-use ouroboros::self_referencing;
-use std::io::{self, BufReader, Read, Seek};
+use std::io::{Cursor, Read, Seek};
 use std::marker::PhantomData;
-use zip::read::{ZipArchive, ZipFile};
+use zip::read::ZipArchive;
 
-pub struct OpenRasterDecoder<'a, R>
+pub struct OpenRasterDecoder<R>
 where
-    R: Read + Seek + 'a,
+    R: Read + Seek,
 {
-    mergedimg_decoder: PngDecoder<BufReader<SeekableArchiveFile<'a, R>>>,
+    mergedimg_decoder: PngDecoder<Cursor<Vec<u8>>>,
+    _phantom: PhantomData<R>,
 }
 
 fn openraster_format_hint() -> ImageFormatHint {
@@ -51,100 +51,9 @@ fn set_ora_image_type(err: ImageError) -> ImageError {
     }
 }
 
-#[self_referencing]
-struct SeekableArchiveCore<'a, R: Read + Seek + 'a> {
-    archive: ZipArchive<R>,
-    #[covariant]
-    #[borrows(mut archive)]
-    file: ZipFile<'this, R>,
-    lifetime_helper: PhantomData<&'a R>,
-}
-
-/// The zip crate does not provide a seekable reader that works on compressed
-/// entries, while png::Decoder requires the Seek bound (but does not currently
-/// use it). This structure implements Seek by reopening and reading the zip
-/// archive entry whenever it seeks backwards.
-struct SeekableArchiveFile<'a, R: Read + Seek + 'a> {
-    core: Option<SeekableArchiveCore<'a, R>>,
-    file_index: usize,
-    position: u64,
-    file_size: u64,
-}
-
-impl<'a, R: Read + Seek + 'a> SeekableArchiveFile<'a, R> {
-    fn new(
-        archive: ZipArchive<R>,
-        file_index: usize,
-    ) -> Result<SeekableArchiveFile<'a, R>, io::Error> {
-        let core = SeekableArchiveCore::try_new(archive, |x| x.by_index(file_index), PhantomData)
-            .map_err(|x| io::Error::other(format!("failed to open: {:?}", x)))?;
-        let file_size = core.with_file(|file| file.size());
-        Ok(SeekableArchiveFile {
-            core: Some(core),
-            file_index,
-            position: 0,
-            file_size,
-        })
-    }
-}
-
-impl<R: Read + Seek> Read for SeekableArchiveFile<'_, R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let res = self
-            .core
-            .as_mut()
-            .unwrap()
-            .with_file_mut(|file| file.read(buf));
-        let nread = res?;
-        self.position
-            .checked_add(nread as u64)
-            .ok_or_else(|| io::Error::other("seek position overflow"))?;
-        Ok(nread)
-    }
-}
-
-impl<R: Read + Seek> Seek for SeekableArchiveFile<'_, R> {
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        let target_pos = match pos {
-            io::SeekFrom::Start(offset) => offset,
-            io::SeekFrom::End(offset) => self
-                .file_size
-                .checked_add_signed(offset)
-                .ok_or_else(|| io::Error::other("seek position over or underflow"))?,
-            io::SeekFrom::Current(offset) => self
-                .position
-                .checked_add_signed(offset)
-                .ok_or_else(|| io::Error::other("seek position over or underflow"))?,
-        };
-
-        if target_pos < self.position {
-            let core = self.core.take();
-            let archive = core.unwrap().into_heads().archive;
-
-            self.core = Some(
-                SeekableArchiveCore::try_new(archive, |x| x.by_index(self.file_index), PhantomData)
-                    .map_err(|x| io::Error::other(format!("failed to reopen: {:?}", x)))?,
-            );
-        }
-        while self.position < target_pos {
-            const TMP_LEN: usize = 1024;
-            let mut tmp = [0_u8; TMP_LEN];
-            let cur_pos = self.position;
-            let nr = self
-                .read(&mut tmp[..std::cmp::min(TMP_LEN as u64, target_pos - cur_pos) as usize])?;
-            if nr == 0 {
-                return Err(io::Error::other("unexpected eof when seeking"));
-            }
-            self.position += nr as u64;
-        }
-
-        Ok(0)
-    }
-}
-
-impl<'a, R> OpenRasterDecoder<'a, R>
+impl<R> OpenRasterDecoder<R>
 where
-    R: Read + Seek + 'a,
+    R: Read + Seek,
 {
     /// Create a new `OpenRasterDecoder` with the provided limits.
     ///
@@ -158,7 +67,7 @@ where
     /// forms an OpenRaster file), memory constraints on the ZIP file decoding
     /// process have not yet been implemented; input ZIP files with very many
     /// entries may require significant amounts of memory to read.
-    pub fn with_limits(r: R, limits: Limits) -> Result<OpenRasterDecoder<'a, R>, ImageError> {
+    pub fn with_limits(r: R, mut limits: Limits) -> Result<OpenRasterDecoder<R>, ImageError> {
         let mut archive = ZipArchive::new(r)
             .map_err(|e| ImageError::Decoding(DecodingError::new(openraster_format_hint(), e)))?;
 
@@ -190,6 +99,7 @@ where
 
         drop(mimetype_file);
 
+        /* Read the full PNG into a buffer. */
         let mergedimage_index = archive.index_for_name("mergedimage.png").ok_or_else(|| {
             ImageError::Decoding(DecodingError::new(
                 openraster_format_hint(),
@@ -197,17 +107,33 @@ where
             ))
         })?;
 
-        let file = SeekableArchiveFile::new(archive, mergedimage_index)?;
+        let mut mergedimage = archive
+            .by_index(mergedimage_index)
+            .map_err(|x| ImageError::Decoding(DecodingError::new(openraster_format_hint(), x)))?;
+        let size = mergedimage.size();
+        if size > isize::MAX as u64 {
+            return Err(ImageError::Limits(image::error::LimitError::from_kind(
+                image::error::LimitErrorKind::InsufficientMemory,
+            )));
+        }
+
+        limits.reserve(size)?;
+        let mut buf = Vec::new();
+        buf.try_reserve_exact(size as usize)?;
+
+        mergedimage.read_to_end(&mut buf)?;
+
         let decoder =
-            PngDecoder::with_limits(BufReader::new(file), limits).map_err(set_ora_image_type)?;
+            PngDecoder::with_limits(Cursor::new(buf), limits).map_err(set_ora_image_type)?;
 
         Ok(OpenRasterDecoder {
             mergedimg_decoder: decoder,
+            _phantom: PhantomData,
         })
     }
 }
 
-impl<'a, R: Read + Seek + 'a> ImageDecoder for OpenRasterDecoder<'a, R> {
+impl<R: Read + Seek> ImageDecoder for OpenRasterDecoder<R> {
     fn dimensions(&self) -> (u32, u32) {
         self.mergedimg_decoder.dimensions()
     }
