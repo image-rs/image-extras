@@ -51,6 +51,35 @@ fn set_ora_image_type(err: ImageError) -> ImageError {
     }
 }
 
+/// Verify that this _is_ an OpenRaster file, and not some unrelated ZIP archive
+fn verify_archive(archive: &mut ZipArchive<impl Read + Seek>) -> ImageResult<()> {
+    let mimetype_index = archive.index_for_name("mimetype").ok_or_else(|| {
+        ImageError::Decoding(DecodingError::new(
+            openraster_format_hint(),
+            "OpenRaster images should contain a mimetype subfile",
+        ))
+    })?;
+
+    let mut mimetype_file = archive
+        .by_index(mimetype_index)
+        .map_err(|x| ImageError::Decoding(DecodingError::new(openraster_format_hint(), x)))?;
+
+    const EXPECTED_MIMETYPE: &str = "image/openraster";
+    let mut tmp = [0u8; EXPECTED_MIMETYPE.len()];
+
+    mimetype_file.read_exact(&mut tmp)?;
+
+    if tmp != EXPECTED_MIMETYPE.as_bytes() || mimetype_file.size() != EXPECTED_MIMETYPE.len() as u64
+    {
+        return Err(ImageError::Decoding(DecodingError::new(
+            openraster_format_hint(),
+            "Image did not have correct mimetype subentry to be identified as OpenRaster",
+        )));
+    }
+
+    Ok(())
+}
+
 impl<R> OpenRasterDecoder<R>
 where
     R: Read + Seek,
@@ -71,35 +100,9 @@ where
         let mut archive = ZipArchive::new(r)
             .map_err(|e| ImageError::Decoding(DecodingError::new(openraster_format_hint(), e)))?;
 
-        /* Verify that this _is_ an OpenRaster file, and not some unrelated ZIP archive */
-        let mimetype_index = archive.index_for_name("mimetype").ok_or_else(|| {
-            ImageError::Decoding(DecodingError::new(
-                openraster_format_hint(),
-                "OpenRaster images should contain a mimetype subfile",
-            ))
-        })?;
+        verify_archive(&mut archive)?;
 
-        let mut mimetype_file = archive
-            .by_index(mimetype_index)
-            .map_err(|x| ImageError::Decoding(DecodingError::new(openraster_format_hint(), x)))?;
-
-        const EXPECTED_MIMETYPE: &str = "image/openraster";
-        let mut tmp = [0u8; EXPECTED_MIMETYPE.len()];
-
-        mimetype_file.read_exact(&mut tmp)?;
-
-        if tmp != EXPECTED_MIMETYPE.as_bytes()
-            || mimetype_file.size() != EXPECTED_MIMETYPE.len() as u64
-        {
-            return Err(ImageError::Decoding(DecodingError::new(
-                openraster_format_hint(),
-                "Image did not have correct mimetype subentry to be identified as OpenRaster",
-            )));
-        }
-
-        drop(mimetype_file);
-
-        /* Read the full PNG into a buffer. */
+        // Read the full PNG into a buffer.
         let mergedimage_index = archive.index_for_name("mergedimage.png").ok_or_else(|| {
             ImageError::Decoding(DecodingError::new(
                 openraster_format_hint(),
