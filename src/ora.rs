@@ -280,6 +280,16 @@ impl<R: Read + Seek> ImageDecoder for OpenRasterDecoder<R> {
         let decoder = PngDecoder::with_limits(BufReader::new(file), self.limits.clone())
             .map_err(set_ora_image_type)?;
 
+        // `ImageDecoder::read_image` will panic if the dimensions and color type
+        // don't match those from the initial header parsing.
+        // Check them here and return an error instead.
+        if decoder.dimensions() != self.dimensions || decoder.color_type() != self.color_type {
+            return Err(ImageError::Decoding(DecodingError::new(
+                openraster_format_hint(),
+                "Merged image dimensions and color type changed",
+            )));
+        }
+
         decoder.read_image(buf)
     }
 
