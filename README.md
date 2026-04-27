@@ -1,5 +1,9 @@
 # image-extras
 
+[![crates.io](https://img.shields.io/crates/v/image-extras.svg)](https://crates.io/crates/image-extras)
+[![Documentation](https://docs.rs/image-extras/badge.svg)](https://docs.rs/image-extras)
+[![Build Status](https://github.com/image-rs/image-extras/workflows/Rust%20CI/badge.svg)](https://github.com/image-rs/image-extras/actions)
+
 Support for additional image formats beyond those provided by the
 [`image`](https://crates.io/crates/image) crate.
 
