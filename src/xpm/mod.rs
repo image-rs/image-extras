@@ -166,6 +166,7 @@ struct XpmHeaderInfo {
     ncolors: u32,
     /// characters per pixel
     cpp: u32,
+    hotspot: Option<(i32, i32)>,
 }
 
 /// XPM color palette storage
@@ -767,7 +768,7 @@ fn read_xpm_header<R: Iterator<Item = u8>>(
     let cpp = parse_u32(int).ok_or(XpmDecodeError::Parse(XpmPart::FirstLine, r.loc()))?;
     skip_spaces_and_tabs(r)?;
 
-    let _hotspot = if let Some(b'"') = r.peek() {
+    let hotspot = if let Some(b'"') = r.peek() {
         // Done
         None
     } else {
@@ -802,6 +803,7 @@ fn read_xpm_header<R: Iterator<Item = u8>>(
         height,
         ncolors,
         cpp,
+        hotspot,
     })
 }
 /// Read the palette portion of the XPM image, stopping just before the first pixel
@@ -1034,6 +1036,11 @@ where
 
         Ok(XpmDecoder { r, info })
     }
+
+    /// Returns the (x,y) hotspot coordinates of the image, if the image provides them.
+    pub fn hotspot(&self) -> Option<(i32, i32)> {
+        self.info.hotspot
+    }
 }
 
 /// Parse color, returning it if the key is also XpmVisual::Color
@@ -1163,6 +1170,22 @@ static char *test[] = {
 
         let decoder = XpmDecoder::new(&data[..]).unwrap();
         let mut image = vec![0; decoder.total_bytes() as usize];
+        assert!(decoder.read_image(&mut image).is_ok());
+    }
+
+    #[test]
+    fn read_hotspot() {
+        let data = b"/* XPM */
+static char *test[] = {
+\"2 2 2 1 -5 2\",
+\"  c none\",
+\". c black\",
+\"..\",
+\". \",
+};";
+        let decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.total_bytes() as usize];
+        assert_eq!(decoder.hotspot(), Some((-5, 2)));
         assert!(decoder.read_image(&mut image).is_ok());
     }
 }
