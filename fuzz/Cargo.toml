@@ -10,7 +10,7 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
-image = { version = "0.25.8", default-features = false }
+image = { git = "https://github.com/image-rs/image", rev = "cf89a940096d7bfdf64899d99cbb4010acb38d2c", default-features = false }
 
 [dependencies.image-extras]
 path = ".."

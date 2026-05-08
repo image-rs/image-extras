@@ -14,7 +14,10 @@ fuzz_target!(|data: &[u8]| {
     };
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(1024 * 1024); // 1 MiB
-    if limits.reserve(decoder.total_bytes()).is_err() {
+    let Ok(info) = decoder.prepare_image() else {
+        return;
+    };
+    if limits.reserve(info.layout.total_bytes()).is_err() {
         return;
     }
     if decoder.set_limits(limits).is_err() {

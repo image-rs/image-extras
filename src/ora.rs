@@ -11,19 +11,31 @@
 //! * <https://www.openraster.org/> - OpenRaster specification
 
 use image::codecs::png::PngDecoder;
-use image::error::{DecodingError, ImageFormatHint, UnsupportedError};
-use image::metadata::Orientation;
-use image::{ColorType, ExtendedColorType, ImageDecoder, ImageError, ImageResult, Limits};
+use image::error::{
+    DecodingError, ImageFormatHint, ParameterError, ParameterErrorKind, UnsupportedError,
+};
+use image::io::{DecodedImageAttributes, DecoderPreparedImage, FormatAttributes, SequenceControl};
+use image::{ImageDecoder, ImageError, ImageResult, Limits};
 use ouroboros::self_referencing;
-use std::io::{self, BufReader, Read, Seek};
+use std::io::{self, BufReader, Cursor, Read, Seek};
 use std::marker::PhantomData;
 use zip::read::{ZipArchive, ZipFile};
+
+enum OraDecodeState<'a, R>
+where
+    R: Read + Seek + 'a,
+{
+    Init(R),
+    Header(Box<PngDecoder<BufReader<SeekableArchiveFile<'a, R>>>>),
+    Done,
+}
 
 pub struct OpenRasterDecoder<'a, R>
 where
     R: Read + Seek + 'a,
 {
-    mergedimg_decoder: PngDecoder<BufReader<SeekableArchiveFile<'a, R>>>,
+    state: OraDecodeState<'a, R>,
+    limits: Limits,
 }
 
 fn openraster_format_hint() -> ImageFormatHint {
@@ -188,63 +200,120 @@ where
     /// process have not yet been implemented; input ZIP files with very many
     /// entries may require significant amounts of memory to read.
     pub fn with_limits(r: R, limits: Limits) -> Result<OpenRasterDecoder<'a, R>, ImageError> {
-        let mut archive = ZipArchive::new(r)
-            .map_err(|e| ImageError::Decoding(DecodingError::new(openraster_format_hint(), e)))?;
-
-        verify_archive(&mut archive)?;
-
-        let mergedimage_index = archive.index_for_name("mergedimage.png").ok_or_else(|| {
-            ImageError::Decoding(DecodingError::new(
-                openraster_format_hint(),
-                "OpenRaster image missing mergedimage.png entry",
-            ))
-        })?;
-
-        let file = SeekableArchiveFile::new(archive, mergedimage_index)?;
-        let decoder =
-            PngDecoder::with_limits(BufReader::new(file), limits).map_err(set_ora_image_type)?;
-
         Ok(OpenRasterDecoder {
-            mergedimg_decoder: decoder,
+            state: OraDecodeState::Init(r),
+            limits,
         })
     }
 }
 
 impl<'a, R: Read + Seek + 'a> ImageDecoder for OpenRasterDecoder<'a, R> {
-    fn dimensions(&self) -> (u32, u32) {
-        self.mergedimg_decoder.dimensions()
+    fn format_attributes(&self) -> FormatAttributes {
+        // The spec leaves it unclear how PNG metadata should be handled. At any
+        // rate, animated images are not permitted.
+        let mut empty: &[u8] = &[];
+        let decoder = PngDecoder::new(Cursor::new(&mut empty));
+        let mut attrib = decoder.format_attributes();
+        attrib.supports_animation = false;
+        attrib.supports_sequence = false;
+        attrib
     }
 
-    fn color_type(&self) -> ColorType {
-        self.mergedimg_decoder.color_type()
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        let decoder = match &mut self.state {
+            OraDecodeState::Init(_) => {
+                let mut state = OraDecodeState::Done;
+                std::mem::swap(&mut state, &mut self.state);
+                let OraDecodeState::Init(reader) = state else {
+                    unreachable!();
+                };
+
+                let mut archive = ZipArchive::new(reader).map_err(|e| {
+                    ImageError::Decoding(DecodingError::new(openraster_format_hint(), e))
+                })?;
+
+                verify_archive(&mut archive)?;
+
+                let mergedimage_index =
+                    archive.index_for_name("mergedimage.png").ok_or_else(|| {
+                        ImageError::Decoding(DecodingError::new(
+                            openraster_format_hint(),
+                            "OpenRaster image missing mergedimage.png entry",
+                        ))
+                    })?;
+
+                let file = SeekableArchiveFile::new(archive, mergedimage_index)?;
+                let decoder = Box::new(PngDecoder::with_limits(
+                    BufReader::new(file),
+                    self.limits.clone(),
+                ));
+
+                self.state = OraDecodeState::Header(decoder);
+                let OraDecodeState::Header(ref mut decoder) = self.state else {
+                    unreachable!();
+                };
+                decoder
+            }
+            OraDecodeState::Header(ref mut decoder) => decoder,
+
+            OraDecodeState::Done => {
+                return Err(ImageError::Parameter(ParameterError::from_kind(
+                    ParameterErrorKind::NoMoreData,
+                )));
+            }
+        };
+
+        decoder.prepare_image().map_err(set_ora_image_type)
     }
 
-    fn original_color_type(&self) -> ExtendedColorType {
-        self.mergedimg_decoder.original_color_type()
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, OraDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 
     fn set_limits(&mut self, limits: Limits) -> ImageResult<()> {
         // Warning: this does not account for any ZIP reading overhead
-        self.mergedimg_decoder.set_limits(limits)
+        self.limits = limits.clone();
+        if let OraDecodeState::Header(ref mut decoder) = &mut self.state {
+            decoder.set_limits(limits.clone())?;
+        }
+        Ok(())
     }
 
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        self.mergedimg_decoder.icc_profile()
+        self.prepare_image()?;
+        let OraDecodeState::Header(ref mut decoder) = self.state else {
+            unreachable!();
+        };
+        decoder.icc_profile().map_err(set_ora_image_type)
     }
 
     fn exif_metadata(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        self.mergedimg_decoder.exif_metadata()
+        self.prepare_image()?;
+        let OraDecodeState::Header(ref mut decoder) = self.state else {
+            unreachable!();
+        };
+        decoder.exif_metadata().map_err(set_ora_image_type)
     }
 
-    fn orientation(&mut self) -> ImageResult<Orientation> {
-        self.mergedimg_decoder.orientation()
+    fn xmp_metadata(&mut self) -> ImageResult<Option<Vec<u8>>> {
+        self.prepare_image()?;
+        let OraDecodeState::Header(ref mut decoder) = self.state else {
+            unreachable!();
+        };
+        decoder.xmp_metadata().map_err(set_ora_image_type)
     }
 
-    fn read_image(self, buf: &mut [u8]) -> ImageResult<()> {
-        self.mergedimg_decoder.read_image(buf)
-    }
-
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        self.prepare_image()?;
+        let OraDecodeState::Header(ref mut decoder) = self.state else {
+            unreachable!();
+        };
+        let res = decoder.read_image(buf).map_err(set_ora_image_type);
+        self.state = OraDecodeState::Done;
+        res
     }
 }

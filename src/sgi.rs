@@ -29,8 +29,13 @@ use std::io::BufRead;
 
 use image::error::{
     DecodingError, ImageError, ImageFormatHint, ImageResult, LimitError, LimitErrorKind,
+    ParameterError, ParameterErrorKind,
 };
-use image::{ColorType, ExtendedColorType, ImageDecoder, LimitSupport, Limits};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
+};
+use image::{ColorType, ImageDecoder, LimitSupport, Limits};
 
 /// The length of the SGI .rgb file header, including padding
 const HEADER_FULL_LENGTH: usize = 512;
@@ -196,10 +201,17 @@ fn parse_header(
     ))
 }
 
+enum SgiDecodeState {
+    Init,
+    Header(SgiRgbHeaderInfo),
+    Done,
+}
+
 /// Decoder for SGI (.rgb) images.
 pub struct SgiDecoder<R> {
-    info: SgiRgbHeaderInfo,
+    state: SgiDecodeState,
     reader: R,
+    limits: Limits,
 }
 
 impl<R> SgiDecoder<R>
@@ -207,14 +219,11 @@ where
     R: BufRead,
 {
     /// Create a new `SgiDecoder`. Assumes `r` starts at seek position 0.
-    pub fn new(mut r: R) -> Result<SgiDecoder<R>, ImageError> {
-        let mut header = [0u8; HEADER_FULL_LENGTH];
-        r.read_exact(&mut header)?;
-        let (header_info, _name) = parse_header(&header)?;
-
+    pub fn new(r: R) -> Result<SgiDecoder<R>, ImageError> {
         Ok(SgiDecoder {
-            info: header_info,
+            state: SgiDecodeState::Init,
             reader: r,
+            limits: Limits::default(),
         })
     }
 }
@@ -515,24 +524,56 @@ fn process_data_segment<const DEEP: bool>(
 }
 
 impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        (self.info.xsize as u32, self.info.ysize as u32)
+    fn format_attributes(&self) -> FormatAttributes {
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
 
-    fn color_type(&self) -> ColorType {
-        self.info.color_type
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        if matches!(self.state, SgiDecodeState::Init) {
+            let mut state = SgiDecodeState::Done;
+            std::mem::swap(&mut state, &mut self.state);
+            let SgiDecodeState::Init = state else {
+                unreachable!();
+            };
+
+            let mut header = [0u8; HEADER_FULL_LENGTH];
+            self.reader.read_exact(&mut header)?;
+            let (info, _name) = parse_header(&header)?;
+            self.state = SgiDecodeState::Header(info);
+            self.set_limits(self.limits.clone())?;
+        }
+
+        match &self.state {
+            SgiDecodeState::Init => unreachable!(),
+            SgiDecodeState::Header(info) => Ok(DecoderPreparedImage::new(
+                u32::from(info.xsize),
+                u32::from(info.ysize),
+                info.color_type,
+            )),
+
+            SgiDecodeState::Done => Err(ImageError::Parameter(ParameterError::from_kind(
+                ParameterErrorKind::NoMoreData,
+            ))),
+        }
     }
 
-    fn original_color_type(&self) -> ExtendedColorType {
-        self.info.color_type.into()
-    }
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let layout = self.prepare_image()?.layout;
+        assert_eq!(u64::try_from(buf.len()), Ok(layout.total_bytes()));
 
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        assert_eq!(u64::try_from(buf.len()), Ok(self.total_bytes()));
+        let mut state = SgiDecodeState::Done;
+        std::mem::swap(&mut state, &mut self.state);
+        let SgiDecodeState::Header(info) = state else {
+            unreachable!();
+        };
 
-        let channels = self.info.color_type.channel_count();
-        let deep = self.info.color_type.bytes_per_pixel() > channels;
-        if self.info.is_rle {
+        let channels = info.color_type.channel_count();
+        let deep = info.color_type.bytes_per_pixel() > channels;
+        if info.is_rle {
             /* Tricky case: need to read the RLE offset tables to determine
              * where to find the scanlines for each plane. Images can place
              * the scanlines whereever, and processing them in logical order
@@ -549,7 +590,7 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
              */
 
             /* `rle_offset_entries` has maximum value `4 * (2^16-1)` and will not overflow */
-            let rle_offset_entries = (channels as u32) * (self.info.ysize as u32);
+            let rle_offset_entries = (channels as u32) * (info.ysize as u32);
 
             let mut rle_table: Vec<SgiRgbScanlineState> = Vec::new();
             /* Tiny invalid images can trigger medium-size 4 * (2^16-1) allocations here;
@@ -574,8 +615,8 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
             );
             // Read offset table
             for plane in 0..channels {
-                for y in 0..self.info.ysize {
-                    let idx = (plane as usize) * (self.info.ysize as usize) + (y as usize);
+                for y in 0..info.ysize {
+                    let idx = (plane as usize) * (info.ysize as usize) + (y as usize);
                     let mut tmp = [0u8; 4];
                     self.reader.read_exact(&mut tmp)?;
                     rle_table[idx].offset = u32::from_be_bytes(tmp);
@@ -585,8 +626,8 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
             }
             // Read length table, and validate (offset, length) pairs
             for plane in 0..channels {
-                for y in 0..self.info.ysize {
-                    let idx = (plane as usize) * (self.info.ysize as usize) + (y as usize);
+                for y in 0..info.ysize {
+                    let idx = (plane as usize) * (info.ysize as usize) + (y as usize);
                     let mut tmp = [0u8; 4];
                     self.reader.read_exact(&mut tmp)?;
                     rle_table[idx].length = u32::from_be_bytes(tmp);
@@ -629,18 +670,12 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
                 }
 
                 let (new_state, done) = if deep {
-                    process_data_segment::<true>(buf, self.info, rle_state, &mut rle_table, buffer)?
+                    process_data_segment::<true>(buf, info, rle_state, &mut rle_table, buffer)?
                 } else {
-                    process_data_segment::<false>(
-                        buf,
-                        self.info,
-                        rle_state,
-                        &mut rle_table,
-                        buffer,
-                    )?
+                    process_data_segment::<false>(buf, info, rle_state, &mut rle_table, buffer)?
                 };
                 if done {
-                    return Ok(());
+                    break;
                 }
                 rle_state = new_state;
 
@@ -652,7 +687,7 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
             if deep {
                 let bpp = 2 * channels;
                 // `width` will be at most `(2^16-1) * 8`, so there is never overflow
-                let width = (bpp as u32) * (self.info.xsize as u32);
+                let width = (bpp as u32) * (info.xsize as u32);
                 for plane in 0..channels as usize {
                     for row in buf.chunks_exact_mut(width as usize).rev() {
                         for px in row.chunks_exact_mut(bpp as usize) {
@@ -664,7 +699,7 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
                     }
                 }
             } else {
-                let width = (channels as u32) * (self.info.xsize as u32);
+                let width = (channels as u32) * (info.xsize as u32);
                 for plane in 0..channels as usize {
                     for row in buf.chunks_exact_mut(width as usize).rev() {
                         for px in row.chunks_exact_mut(channels as usize) {
@@ -673,33 +708,43 @@ impl<R: BufRead> ImageDecoder for SgiDecoder<R> {
                     }
                 }
             }
-            Ok(())
         }
-    }
 
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+        Ok(DecodedImageAttributes::default())
     }
 
     fn set_limits(&mut self, limits: Limits) -> ImageResult<()> {
         limits.check_support(&LimitSupport::default())?;
-        let (width, height) = self.dimensions();
-        limits.check_dimensions(width, height)?;
+        self.limits = limits;
+        let SgiDecodeState::Header(info) = self.state else {
+            return Ok(());
+        };
+
+        let (width, height) = (u32::from(info.xsize), u32::from(info.ysize));
+        self.limits.check_dimensions(width, height)?;
 
         // This will not overflow, because 8 * (2^16-1) * (2^16-1) ≤ 2^35
-        let max_image_bytes = 8 * (self.info.xsize as u64) * (self.info.ysize as u64);
+        let max_image_bytes = 8 * u64::from(info.xsize) * u64::from(info.ysize);
         // This will not overflow, because even 1 KB * (2^16-1) ≤ 2^35 ⪡ 2^64-1
         let max_table_bytes =
-            (self.info.ysize as u64) * (std::mem::size_of::<SgiRgbScanlineState>() as u64);
+            u64::from(info.ysize) * (std::mem::size_of::<SgiRgbScanlineState>() as u64);
         // This will not overflow, because it is ≤ 2^36 ⪡ 2^64-1
         let max_bytes = max_image_bytes + max_table_bytes;
 
-        let max_alloc = limits.max_alloc.unwrap_or(u64::MAX);
+        let max_alloc = self.limits.max_alloc.unwrap_or(u64::MAX);
         if max_alloc < max_bytes {
             return Err(ImageError::Limits(LimitError::from_kind(
                 LimitErrorKind::InsufficientMemory,
             )));
         }
         Ok(())
+    }
+
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, SgiDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 }

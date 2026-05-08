@@ -9,7 +9,12 @@
 use std::io::{BufRead, Seek, Write};
 
 use image::error::{
-    DecodingError, EncodingError, ImageFormatHint, UnsupportedError, UnsupportedErrorKind,
+    DecodingError, EncodingError, ImageFormatHint, ParameterError, ParameterErrorKind,
+    UnsupportedError, UnsupportedErrorKind,
+};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
 };
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
 
@@ -59,10 +64,15 @@ impl<W: Write> ImageEncoder for WbmpEncoder<W> {
     }
 }
 
+enum WbmpDecodeState<R> {
+    Init(R),
+    Header(wbmp::Decoder<R>),
+    Done,
+}
+
 /// Decoder for Wbmp images.
 pub struct WbmpDecoder<R> {
-    dimensions: (u32, u32),
-    inner: wbmp::Decoder<R>,
+    state: WbmpDecodeState<R>,
 }
 
 impl<R> WbmpDecoder<R>
@@ -71,35 +81,72 @@ where
 {
     /// Create a new `WbmpDecoder`.
     pub fn new(r: R) -> Result<WbmpDecoder<R>, ImageError> {
-        let inner = wbmp::Decoder::new(r).map_err(convert_wbmp_error)?;
-        let dimensions = inner.dimensions();
-
-        Ok(WbmpDecoder { dimensions, inner })
+        Ok(WbmpDecoder {
+            state: WbmpDecodeState::Init(r),
+        })
     }
 }
 
 impl<R: BufRead + Seek> ImageDecoder for WbmpDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        self.dimensions
+    fn format_attributes(&self) -> FormatAttributes {
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
 
-    fn color_type(&self) -> ColorType {
-        ColorType::L8
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        let dimensions = match &self.state {
+            WbmpDecodeState::Init(_) => {
+                let mut state = WbmpDecodeState::Done;
+                std::mem::swap(&mut state, &mut self.state);
+                let WbmpDecodeState::Init(reader) = state else {
+                    unreachable!();
+                };
+
+                let inner = wbmp::Decoder::new(reader).map_err(convert_wbmp_error)?;
+                let dimensions = inner.dimensions();
+                self.state = WbmpDecodeState::Header(inner);
+                dimensions
+            }
+            WbmpDecodeState::Header(decoder) => decoder.dimensions(),
+
+            WbmpDecodeState::Done => {
+                return Err(ImageError::Parameter(ParameterError::from_kind(
+                    ParameterErrorKind::NoMoreData,
+                )));
+            }
+        };
+
+        Ok(DecoderPreparedImage::new(
+            dimensions.0,
+            dimensions.1,
+            ColorType::L8,
+        ))
     }
 
-    fn original_color_type(&self) -> ExtendedColorType {
-        ExtendedColorType::L1
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let info = self.prepare_image()?;
+        assert_eq!(buf.len() as u64, info.total_bytes(), "Invalid buffer size");
+
+        let WbmpDecodeState::Header(decoder) = &mut self.state else {
+            unreachable!();
+        };
+        decoder.read_image_data(buf).map_err(convert_wbmp_error)?;
+        self.state = WbmpDecodeState::Done;
+
+        let mut attribs = DecodedImageAttributes::default();
+        attribs.original_color_type = Some(ExtendedColorType::L1);
+        Ok(attribs)
     }
 
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        let (width, height) = self.dimensions;
-        assert_eq!(buf.len(), (width * height) as usize, "Invalid buffer size");
-
-        self.inner.read_image_data(buf).map_err(convert_wbmp_error)
-    }
-
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, WbmpDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 }
 
