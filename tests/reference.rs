@@ -1,6 +1,21 @@
 use image::ColorType;
 use walkdir::WalkDir;
 
+fn is_type_supported(t: &str) -> bool {
+    match t {
+        "dds" => cfg!(feature = "dds"),
+        "icns" => cfg!(feature = "icns"),
+        "ora" => cfg!(feature = "ora"),
+        "otb" => cfg!(feature = "otb"),
+        "pcx" => cfg!(feature = "pcx"),
+        "sgi" => cfg!(feature = "sgi"),
+        "xbm" => cfg!(feature = "xbm"),
+        "xpm" => cfg!(feature = "xpm"),
+        "wbmp" => cfg!(feature = "wbmp"),
+        _ => panic!("Unexpected image type subfolder {t:?}, update this function"),
+    }
+}
+
 /// Test decoding of all test images in `tests/images/` against reference images
 /// (either PNG or TIFF).
 ///
@@ -29,6 +44,24 @@ fn test_decoding() {
             || entry.path().extension().unwrap() == "png"
             || entry.path().extension().unwrap() == "tiff"
         {
+            continue;
+        }
+
+        let group = entry
+            .path()
+            .ancestors()
+            .nth(1)
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        if !is_type_supported(group) {
+            println!(
+                "Skipped {}: (feature for {} disabled)",
+                entry.path().display(),
+                group
+            );
             continue;
         }
 

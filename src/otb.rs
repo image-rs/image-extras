@@ -9,7 +9,14 @@
 use std::fmt::{self, Display};
 use std::io::{BufRead, Seek, Write};
 
-use image::error::{DecodingError, EncodingError, ImageFormatHint, LimitError, LimitErrorKind};
+use image::error::{
+    DecodingError, EncodingError, ImageFormatHint, LimitError, LimitErrorKind, ParameterError,
+    ParameterErrorKind,
+};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
+};
 use image::{ColorType, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageResult};
 
 /// All errors that can occur when attempting to encode an image to OTB format
@@ -144,10 +151,16 @@ impl From<DecoderError> for ImageError {
     }
 }
 
+enum OtbDecodeState {
+    Init,
+    Header { dimensions: (u32, u32) },
+    Done,
+}
+
 /// Decoder for Otb images.
 pub struct OtbDecoder<R> {
     reader: R,
-    dimensions: (u32, u32),
+    state: OtbDecodeState,
 }
 
 impl<R> OtbDecoder<R>
@@ -156,19 +169,13 @@ where
 {
     /// Create a new `OtbDecoder`.
     pub fn new(reader: R) -> Result<OtbDecoder<R>, ImageError> {
-        let mut decoder = Self::new_decoder(reader);
-        decoder.read_metadata()?;
-        Ok(decoder)
-    }
-
-    fn new_decoder(reader: R) -> OtbDecoder<R> {
-        Self {
+        Ok(Self {
             reader,
-            dimensions: (0, 0),
-        }
+            state: OtbDecodeState::Init,
+        })
     }
 
-    fn read_metadata(&mut self) -> Result<(), ImageError> {
+    fn read_metadata(&mut self) -> Result<(u32, u32), ImageError> {
         let mut buf = [0_u8; 1];
 
         self.reader.read_exact(&mut buf)?;
@@ -210,32 +217,62 @@ where
             return Err(DecoderError::UnsupportedColorDepth(depth).into());
         }
 
-        self.dimensions = (width as u32, height as u32);
-
-        Ok(())
+        Ok((width as u32, height as u32))
     }
 }
 
 impl<R: BufRead + Seek> ImageDecoder for OtbDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        self.dimensions
+    fn format_attributes(&self) -> FormatAttributes {
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
 
-    fn color_type(&self) -> ColorType {
-        ColorType::L8
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        let dimensions = match self.state {
+            OtbDecodeState::Init => {
+                let dimensions = self.read_metadata()?;
+                self.state = OtbDecodeState::Header { dimensions };
+                dimensions
+            }
+            OtbDecodeState::Header { dimensions } => dimensions,
+
+            OtbDecodeState::Done => {
+                return Err(ImageError::Parameter(ParameterError::from_kind(
+                    ParameterErrorKind::NoMoreData,
+                )));
+            }
+        };
+
+        Ok(DecoderPreparedImage::new(
+            dimensions.0,
+            dimensions.1,
+            ColorType::L8,
+        ))
     }
 
-    fn original_color_type(&self) -> ExtendedColorType {
-        ExtendedColorType::L1
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, OtbDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        let (width, height) = (self.dimensions.0 as usize, self.dimensions.1 as usize);
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let info = self.prepare_image()?;
+        let (width, height) = info.layout.dimensions();
 
-        assert_eq!(buf.len(), width * height, "Invalid buffer length");
+        assert_eq!(
+            buf.len() as u64,
+            u64::from(width) * u64::from(height),
+            "Invalid buffer length"
+        );
 
         // Read entire image data into a buffer
-        let mut byte_buf = vec![0_u8; (width * height).div_ceil(8)].into_boxed_slice();
+        let mut byte_buf = vec![0_u8; ((width * height) as usize).div_ceil(8)].into_boxed_slice();
         self.reader.read_exact(&mut byte_buf)?;
 
         // Set a byte in buf for every bit in the image data
@@ -253,11 +290,11 @@ impl<R: BufRead + Seek> ImageDecoder for OtbDecoder<R> {
                 };
             }
         }
-        Ok(())
-    }
+        let mut attrib = DecodedImageAttributes::default();
+        attrib.original_color_type = Some(ExtendedColorType::L1);
 
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+        self.state = OtbDecodeState::Done;
+        Ok(attrib)
     }
 }
 
@@ -290,8 +327,8 @@ mod test {
             0x0E, 0x4E, 0x67, 0x0F, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0x00, // End Image Data
         ];
-        let decoder = crate::otb::OtbDecoder::new(Cursor::new(otb_data)).unwrap();
-        let (width, height) = decoder.dimensions();
+        let mut decoder = crate::otb::OtbDecoder::new(Cursor::new(otb_data)).unwrap();
+        let (width, height) = decoder.prepare_image().unwrap().layout.dimensions();
         assert!(width == 0x48);
         assert!(height == 0x1C);
         let mut img_bytes = vec![0; 2016];
@@ -334,8 +371,8 @@ mod test {
             0b00_000000,
             0b0000_0000,
         ];
-        let decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
-        let (width, height) = decoder.dimensions();
+        let mut decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
+        let (width, height) = decoder.prepare_image().unwrap().layout.dimensions();
         assert!(width == 10);
         assert!(height == 10);
         let mut img_bytes = vec![0; 100];
@@ -370,8 +407,8 @@ mod test {
             0b00100100, // row7
             0b00011000, // row8
         ];
-        let decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
-        let (width, height) = decoder.dimensions();
+        let mut decoder = crate::otb::OtbDecoder::new(Cursor::new(image_data)).unwrap();
+        let (width, height) = decoder.prepare_image().unwrap().layout.dimensions();
         assert!(width == 8);
         assert!(height == 8);
         let mut img_bytes = vec![0; 64];

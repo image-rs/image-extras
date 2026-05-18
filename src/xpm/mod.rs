@@ -55,6 +55,11 @@ use std::io::{BufRead, Bytes};
 
 use image::error::{
     DecodingError, ImageError, ImageFormatHint, ImageResult, LimitError, LimitErrorKind,
+    ParameterError, ParameterErrorKind,
+};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
 };
 use image::{ColorType, ImageDecoder, LimitSupport, Limits};
 
@@ -153,10 +158,19 @@ where
     }
 }
 
+enum XpmDecodeState<R> {
+    Init(R),
+    Header {
+        r: TextReader<IoAdapter<R>>,
+        info: XpmHeaderInfo,
+    },
+    Done,
+}
+
 /// XPM decoder
 pub struct XpmDecoder<R> {
-    r: TextReader<IoAdapter<R>>,
-    info: XpmHeaderInfo,
+    state: XpmDecodeState<R>,
+    limits: Limits,
 }
 
 /// Key XPM file properties determined from first line
@@ -1027,19 +1041,20 @@ where
 {
     /// Create a new [XpmDecoder].
     pub fn new(reader: R) -> Result<XpmDecoder<R>, ImageError> {
-        let mut r = TextReader::new(IoAdapter {
-            reader: reader.bytes(),
-            error: None,
-        });
-
-        let info = read_xpm_header(&mut r).apply_after(&mut r.inner.error)?;
-
-        Ok(XpmDecoder { r, info })
+        Ok(XpmDecoder {
+            state: XpmDecodeState::Init(reader),
+            limits: Limits::default(),
+        })
     }
 
     /// Returns the (x,y) hotspot coordinates of the image, if the image provides them.
-    pub fn hotspot(&self) -> Option<(i32, i32)> {
-        self.info.hotspot
+    /// This will error if called after `read_image()`.
+    pub fn hotspot(&mut self) -> ImageResult<Option<(i32, i32)>> {
+        self.prepare_image()?;
+        let XpmDecodeState::Header { info, .. } = &self.state else {
+            unreachable!();
+        };
+        Ok(info.hotspot)
     }
 }
 
@@ -1057,52 +1072,100 @@ fn handle_key_color(key: &XpmVisual, color: &[u8]) -> Result<Option<[u16; 4]>, X
 }
 
 impl<R: BufRead> ImageDecoder for XpmDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        (self.info.width, self.info.height)
+    fn format_attributes(&self) -> FormatAttributes {
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
-    fn color_type(&self) -> ColorType {
-        // note: some images specify 16-bpc colors, and fully transparent pixels are possible,
-        // so RGBA16 is needed to handle all possible cases
-        ColorType::Rgba16
-    }
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()>
-    where
-        Self: Sized,
-    {
-        assert!(1 <= self.info.cpp && self.info.cpp <= 8);
 
-        let palette =
-            read_xpm_palette(&mut self.r, &self.info).apply_after(&mut self.r.inner.error)?;
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        if matches!(self.state, XpmDecodeState::Init(_)) {
+            let mut state = XpmDecodeState::Done;
+            std::mem::swap(&mut state, &mut self.state);
+            let XpmDecodeState::Init(reader) = state else {
+                unreachable!();
+            };
+
+            let mut r = TextReader::new(IoAdapter {
+                reader: reader.bytes(),
+                error: None,
+            });
+
+            let info = read_xpm_header(&mut r).apply_after(&mut r.inner.error)?;
+
+            self.state = XpmDecodeState::Header { r, info };
+            self.set_limits(self.limits.clone())?;
+        }
+
+        match &self.state {
+            XpmDecodeState::Init(_) => unreachable!(),
+            XpmDecodeState::Header { info, .. } => Ok(DecoderPreparedImage::new(
+                info.width,
+                info.height,
+                // note: some images specify 16-bpc colors, and fully transparent pixels are possible,
+                // so RGBA16 is needed to handle all possible cases
+                ColorType::Rgba16,
+            )),
+
+            XpmDecodeState::Done => Err(ImageError::Parameter(ParameterError::from_kind(
+                ParameterErrorKind::NoMoreData,
+            ))),
+        }
+    }
+
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let layout = self.prepare_image()?.layout;
+        assert_eq!(u64::try_from(buf.len()), Ok(layout.total_bytes()));
+
+        let mut state = XpmDecodeState::Done;
+        std::mem::swap(&mut state, &mut self.state);
+        let XpmDecodeState::Header { mut r, info } = state else {
+            unreachable!();
+        };
+        assert!(1 <= info.cpp && info.cpp <= 8);
+
+        let palette = read_xpm_palette(&mut r, &info).apply_after(&mut r.inner.error)?;
 
         // Read main image contents
-        let stride = (self.info.width as usize).checked_mul(8).unwrap();
+        let stride = (info.width as usize).checked_mul(8).unwrap();
         for (i, row) in buf.chunks_exact_mut(stride).enumerate() {
             for chunk in row.chunks_exact_mut(8) {
-                read_xpm_pixel(&mut self.r, &self.info, &palette, chunk.try_into().unwrap())
-                    .apply_after(&mut self.r.inner.error)?;
+                read_xpm_pixel(&mut r, &info, &palette, chunk.try_into().unwrap())
+                    .apply_after(&mut r.inner.error)?;
             }
 
-            if i >= (self.info.height - 1) as usize {
+            if i >= (info.height - 1) as usize {
                 // Last row,
             } else {
-                read_xpm_row_transition(&mut self.r).apply_after(&mut self.r.inner.error)?;
+                read_xpm_row_transition(&mut r).apply_after(&mut r.inner.error)?;
             }
         }
 
-        read_xpm_trailing(&mut self.r).apply_after(&mut self.r.inner.error)?;
+        read_xpm_trailing(&mut r).apply_after(&mut r.inner.error)?;
 
-        Ok(())
+        Ok(DecodedImageAttributes::default())
     }
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, XpmDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 
     fn set_limits(&mut self, limits: Limits) -> ImageResult<()> {
         limits.check_support(&LimitSupport::default())?;
-        let (width, height) = self.dimensions();
-        limits.check_dimensions(width, height)?;
+        self.limits = limits;
+        let XpmDecodeState::Header { info, .. } = &self.state else {
+            return Ok(());
+        };
 
-        let max_pixels = u64::from(self.info.width) * u64::from(self.info.height);
+        self.limits.check_dimensions(info.width, info.height)?;
+
+        let max_pixels = u64::from(info.width) * u64::from(info.height);
         let max_image_bytes =
             max_pixels
                 .checked_mul(8)
@@ -1110,14 +1173,13 @@ impl<R: BufRead> ImageDecoder for XpmDecoder<R> {
                     LimitErrorKind::DimensionError,
                 )))?;
 
-        let max_table_bytes = (self.info.ncolors as u64) * (size_of::<XpmColorCodeEntry>() as u64);
+        let max_table_bytes = (info.ncolors as u64) * (size_of::<XpmColorCodeEntry>() as u64);
         let max_bytes = max_image_bytes
             .checked_add(max_table_bytes)
             .ok_or(ImageError::Limits(LimitError::from_kind(
                 LimitErrorKind::InsufficientMemory,
             )))?;
-
-        let max_alloc = limits.max_alloc.unwrap_or(u64::MAX);
+        let max_alloc = self.limits.max_alloc.unwrap_or(u64::MAX);
         if max_alloc < max_bytes {
             return Err(ImageError::Limits(LimitError::from_kind(
                 LimitErrorKind::InsufficientMemory,
@@ -1138,8 +1200,8 @@ static char *test[] = {
 \"20 5 10 1\",
 };
 ";
-        let decoder = XpmDecoder::new(&data[..]).unwrap();
-        let mut image = vec![0; decoder.total_bytes() as usize];
+        let mut decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.prepare_image().unwrap().layout.total_bytes() as usize];
         assert!(decoder.read_image(&mut image).is_err());
     }
 
@@ -1151,8 +1213,8 @@ static char *test[] = {
     \"  c Antique White1\",
     \" \",
 };";
-        let decoder = XpmDecoder::new(&data[..]).unwrap();
-        let mut image = vec![0; decoder.total_bytes() as usize];
+        let mut decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.prepare_image().unwrap().layout.total_bytes() as usize];
         assert!(decoder.read_image(&mut image).is_err());
     }
 
@@ -1164,12 +1226,12 @@ static char *test[] = {
         \"  c none\",
         \" \",
     };";
-        let decoder = XpmDecoder::new(&data[..data.len() - 1]).unwrap();
-        let mut image = vec![0; decoder.total_bytes() as usize];
+        let mut decoder = XpmDecoder::new(&data[..data.len() - 1]).unwrap();
+        let mut image = vec![0; decoder.prepare_image().unwrap().layout.total_bytes() as usize];
         assert!(decoder.read_image(&mut image).is_err());
 
-        let decoder = XpmDecoder::new(&data[..]).unwrap();
-        let mut image = vec![0; decoder.total_bytes() as usize];
+        let mut decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.prepare_image().unwrap().layout.total_bytes() as usize];
         assert!(decoder.read_image(&mut image).is_ok());
     }
 
@@ -1183,9 +1245,9 @@ static char *test[] = {
 \"..\",
 \". \",
 };";
-        let decoder = XpmDecoder::new(&data[..]).unwrap();
-        let mut image = vec![0; decoder.total_bytes() as usize];
-        assert_eq!(decoder.hotspot(), Some((-5, 2)));
+        let mut decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.prepare_image().unwrap().layout.total_bytes() as usize];
+        assert_eq!(decoder.hotspot().unwrap(), Some((-5, 2)));
         assert!(decoder.read_image(&mut image).is_ok());
     }
 }

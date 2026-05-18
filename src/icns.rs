@@ -24,8 +24,12 @@ use std::fmt::{self, Display};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
 use image::error::{
-    DecodingError, ImageFormatHint, LimitError, LimitErrorKind, UnsupportedError,
-    UnsupportedErrorKind,
+    DecodingError, ImageFormatHint, LimitError, LimitErrorKind, ParameterError, ParameterErrorKind,
+    UnsupportedError, UnsupportedErrorKind,
+};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
 };
 use image::{ColorType, ImageDecoder, ImageError, ImageReader, ImageResult, LimitSupport, Limits};
 
@@ -200,13 +204,12 @@ pub fn decode_jpeg2000_using_hook(
     // The magic bytes have already been checked by IcnsDecoder, so it is unlikely
     // that a different format's decoder will be used be accident.
     // TODO:  explicitly set JPEG 2000 as the format, to be certain
-    let mut reader = ImageReader::new(Cursor::new(data));
-    reader = reader.with_guessed_format()?;
+    let mut reader = ImageReader::new(Cursor::new(data)).map_err(jp2_to_image_error)?;
     let mut limits = Limits::no_limits();
     limits.max_alloc = Some(allocation_limit);
-    reader.limits(limits);
+    reader.set_limits(limits).map_err(jp2_to_image_error)?;
 
-    let image = reader.decode().map_err(jp2_to_image_error)?;
+    let (image, _metadata) = reader.decode().map_err(jp2_to_image_error)?;
     if image.width() != size || image.height() != size {
         return Err(DecoderError::BadJp2Size(image.width(), image.height(), size).into());
     }
@@ -266,14 +269,20 @@ impl IcnsEntry {
     }
 }
 
+enum IcnsDecodeState {
+    Init,
+    Header {
+        main: IcnsEntry,
+        // If a mask entry applies to the main image, its details will be indicated here
+        mask: Option<IcnsEntry>,
+    },
+    Done,
+}
+
 /// ICNS decoder
 pub struct IcnsDecoder<R> {
     reader: R,
-
-    main: IcnsEntry,
-    // If a mask entry applies to the main image, its details will be indicated here
-    mask: Option<IcnsEntry>,
-
+    state: IcnsDecodeState,
     limits: Limits,
     jp2: SubformatDecodeFn,
 }
@@ -314,9 +323,18 @@ where
     /// function that can be used to decode the JP2 images. See for example
     /// [unsupported_jpeg2000], and [decode_jpeg2000_using_hook].
     pub fn new_with_decode_func(
-        mut reader: R,
+        reader: R,
         jp2: SubformatDecodeFn,
     ) -> Result<IcnsDecoder<R>, ImageError> {
+        Ok(IcnsDecoder {
+            reader,
+            state: IcnsDecodeState::Init,
+            limits: Limits::no_limits(),
+            jp2,
+        })
+    }
+
+    fn scan_file(reader: &mut R) -> ImageResult<IcnsDecodeState> {
         let mut header = [0u8; 8];
         reader.read_exact(&mut header)?;
         let (magic, file_len_field) = header.split_at(4);
@@ -393,39 +411,66 @@ where
                 return Err(DecoderError::MissingMask(main.code).into());
             }
         }
-        Ok(IcnsDecoder {
-            reader,
-            main,
-            mask,
-            limits: Limits::no_limits(),
-            jp2,
-        })
+
+        Ok(IcnsDecodeState::Header { main, mask })
     }
 }
 
 impl<R: Read + Seek> ImageDecoder for IcnsDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        (self.main.code.pixel_width(), self.main.code.pixel_height())
+    fn format_attributes(&self) -> FormatAttributes {
+        // The decoder currently treats PNG and JP2 images purely as data sources,
+        // ignoring any color space information.
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
 
-    fn color_type(&self) -> ColorType {
-        match self.main.code.encoding() {
-            Encoding::Mask8 => unreachable!(),
-            Encoding::Mono => ColorType::L8,
-            Encoding::MonoA => ColorType::La8,
-            _ => ColorType::Rgba8,
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        if matches!(self.state, IcnsDecodeState::Init) {
+            let mut state = IcnsDecodeState::Done;
+            std::mem::swap(&mut state, &mut self.state);
+            let IcnsDecodeState::Init = state else {
+                unreachable!();
+            };
+            self.state = Self::scan_file(&mut self.reader)?;
+            self.set_limits(self.limits.clone())?;
+        }
+
+        match &self.state {
+            IcnsDecodeState::Init => unreachable!(),
+            IcnsDecodeState::Header { main, .. } => Ok(DecoderPreparedImage::new(
+                main.code.pixel_width(),
+                main.code.pixel_height(),
+                match main.code.encoding() {
+                    Encoding::Mask8 => unreachable!(),
+                    Encoding::Mono => ColorType::L8,
+                    Encoding::MonoA => ColorType::La8,
+                    _ => ColorType::Rgba8,
+                },
+            )),
+
+            IcnsDecodeState::Done => Err(ImageError::Parameter(ParameterError::from_kind(
+                ParameterErrorKind::NoMoreData,
+            ))),
         }
     }
 
     fn set_limits(&mut self, mut limits: Limits) -> ImageResult<()> {
         limits.check_support(&LimitSupport::default())?;
-        let (width, height) = self.dimensions();
+        self.limits = limits.clone();
+
+        let IcnsDecodeState::Header { main, mask } = &self.state else {
+            return Ok(());
+        };
+        let (width, height) = (main.code.pixel_width(), main.code.pixel_height());
         limits.check_dimensions(width, height)?;
 
-        let icon_size = self.main.code.pixel_width();
+        let icon_size = main.code.pixel_width();
 
-        let main_data = self.main.length;
-        let mask_data = self.mask.map(|x| x.length).unwrap_or_default();
+        let main_data = main.length;
+        let mask_data = mask.map(|x| x.length).unwrap_or_default();
 
         // Decoding non PNG/JP2 icons using `icns` can create temporary images using
         // a maximum of about 4 + 4 bytes per pixel (up to 4 for the initial decoding
@@ -448,54 +493,61 @@ impl<R: Read + Seek> ImageDecoder for IcnsDecoder<R> {
         Ok(())
     }
 
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        assert!(self.total_bytes() == buf.len().try_into().unwrap());
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let info = self.prepare_image()?;
+        assert!(info.total_bytes() == buf.len().try_into().unwrap());
 
-        let main_data = read_vec_at(&mut self.reader, self.main.stream_pos, self.main.length)?;
+        let mut state = IcnsDecodeState::Done;
+        std::mem::swap(&mut state, &mut self.state);
+        let IcnsDecodeState::Header { main, mask } = state else {
+            unreachable!();
+        };
+
+        let main_data = read_vec_at(&mut self.reader, main.stream_pos, main.length)?;
 
         const PNG_SIGNATURE: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         const JP2_SIGNATURE: &[u8] = &[
             0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
         ];
 
-        if self.main.code.encoding() == Encoding::JP2PNG {
+        if main.code.encoding() == Encoding::JP2PNG {
             // Handle JP2 or PNG images _directly_ in this implementation, in order
             // to implement memory limits and make it easier to keep these complicated
             // format decoders up to date.
             if main_data.starts_with(PNG_SIGNATURE) {
                 decode_png(
                     &main_data,
-                    self.main.code.pixel_width(),
+                    main.code.pixel_width(),
                     buf,
                     self.limits.max_alloc.unwrap_or(u64::MAX),
                 )?;
             } else if main_data.starts_with(JP2_SIGNATURE) {
                 (self.jp2)(
                     &main_data,
-                    self.main.code.pixel_width(),
+                    main.code.pixel_width(),
                     buf,
                     self.limits.max_alloc.unwrap_or(u64::MAX),
                 )?;
             } else {
-                return Err(DecoderError::NotPNGorJP2(self.main.code).into());
+                return Err(DecoderError::NotPNGorJP2(main.code).into());
             }
         } else {
-            let main = IconElement::new(self.main.code.ostype(), main_data);
+            let elem = IconElement::new(main.code.ostype(), main_data);
 
-            let img = if let Some(mask_entry) = &self.mask {
+            let img = if let Some(mask_entry) = &mask {
                 let mask_data =
                     read_vec_at(&mut self.reader, mask_entry.stream_pos, mask_entry.length)?;
                 let mask = IconElement::new(mask_entry.code.ostype(), mask_data);
 
-                main.decode_image_with_mask(&mask)?
+                elem.decode_image_with_mask(&mask)?
             } else {
-                assert!(self.main.code.mask_type().is_none());
-                main.decode_image()?
+                assert!(main.code.mask_type().is_none());
+                elem.decode_image()?
             };
-            assert!((img.width(), img.height()) == self.dimensions());
+            assert!((img.width(), img.height()) == info.layout.dimensions());
             assert!(img.pixel_format() != PixelFormat::Alpha);
 
-            match (img.pixel_format(), self.color_type()) {
+            match (img.pixel_format(), info.layout.color) {
                 (PixelFormat::Gray, ColorType::L8) => {
                     buf.copy_from_slice(img.data());
                 }
@@ -514,15 +566,19 @@ impl<R: Read + Seek> ImageDecoder for IcnsDecoder<R> {
                 _ => unreachable!(
                     "icns crate produced {:?}, not compatible with {:?}",
                     img.pixel_format(),
-                    self.color_type()
+                    info.layout.color
                 ),
             };
         }
 
-        Ok(())
+        Ok(DecodedImageAttributes::default())
     }
 
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, IcnsDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
+        }
     }
 }

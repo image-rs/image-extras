@@ -12,15 +12,24 @@ use std::io::{Read, Seek};
 
 use dds::header::ParseOptions;
 use dds::{
-    Channels, ColorFormat, DataLayout, Decoder, Format, ImageViewMut, Offset, Size,
-    TextureArrayKind,
+    Channels, ColorFormat, DataLayout, Decoder, Format, ImageViewMut, Size, TextureArrayKind,
 };
 
 use image::error::{
     DecodingError, ImageError, ImageFormatHint, ImageResult, LimitError, LimitErrorKind,
-    UnsupportedError, UnsupportedErrorKind,
+    ParameterError, ParameterErrorKind, UnsupportedError, UnsupportedErrorKind,
 };
-use image::{ColorType, ExtendedColorType, ImageDecoder, ImageDecoderRect};
+use image::io::{
+    DecodedImageAttributes, DecodedMetadataHint, DecoderPreparedImage, FormatAttributes,
+    SequenceControl,
+};
+use image::{ColorType, ExtendedColorType, ImageDecoder, Limits};
+
+enum DdsDecodeState<R> {
+    Init(R),
+    Header(Decoder<R>),
+    Done,
+}
 
 /// DDS decoder.
 ///
@@ -30,70 +39,18 @@ use image::{ColorType, ExtendedColorType, ImageDecoder, ImageDecoderRect};
 /// It's possible to set the color type the image is decoded as using
 /// [`DdsDecoder::set_color_type`].
 pub struct DdsDecoder<R> {
-    inner: Decoder<R>,
-    is_cubemap: bool,
-    size: Size,
-    color: SupportedColor,
+    state: DdsDecodeState<R>,
+    requested_color: Option<SupportedColor>,
+    limits: Limits,
 }
 
 impl<R: Read> DdsDecoder<R> {
     /// Create a new decoder that decodes from the stream `r`
     pub fn new(r: R) -> ImageResult<Self> {
-        let options = ParseOptions::new_permissive(None);
-        let decoder = Decoder::new_with_options(r, &options).map_err(to_image_error)?;
-        let layout = decoder.layout();
-
-        // We only support DDS files with:
-        // - A single main image with any number of mipmaps
-        // - A texture array of length 1 representing a cube map
-        match &layout {
-            DataLayout::Volume(_) => {
-                return Err(ImageError::Decoding(DecodingError::new(
-                    format_hint(),
-                    "DDS volume textures are not supported for decoding",
-                )))
-            }
-            DataLayout::TextureArray(texture_array) => {
-                let supported_length = match texture_array.kind() {
-                    TextureArrayKind::Textures => 1,
-                    TextureArrayKind::CubeMaps => 6,
-                    TextureArrayKind::PartialCubeMap(cube_map_faces) => cube_map_faces.count(),
-                };
-                if texture_array.len() != supported_length as usize {
-                    return Err(ImageError::Decoding(DecodingError::new(
-                        format_hint(),
-                        "DDS texture arrays are not supported for decoding",
-                    )));
-                }
-            }
-            DataLayout::Texture(_) => {}
-        }
-
-        let mut size = decoder.main_size();
-        let mut color = decoder.native_color();
-        let is_cubemap = layout.is_cube_map();
-
-        // all cube map faces are read as one RGBA image
-        if is_cubemap {
-            if let (Some(width), Some(height)) =
-                (size.width.checked_mul(4), size.height.checked_mul(3))
-            {
-                size.width = width;
-                size.height = height;
-                color.channels = Channels::Rgba;
-            } else {
-                return Err(ImageError::Decoding(DecodingError::new(
-                    format_hint(),
-                    "DDS cube map faces are too large to decode",
-                )));
-            }
-        }
-
         Ok(DdsDecoder {
-            inner: decoder,
-            is_cubemap,
-            size,
-            color: SupportedColor::from_dds_widen(color),
+            state: DdsDecodeState::Init(r),
+            requested_color: None,
+            limits: Limits::default(),
         })
     }
 
@@ -124,109 +81,174 @@ impl<R: Read> DdsDecoder<R> {
                 ),
             ));
         };
-        self.color = supported_color;
+        self.requested_color = Some(supported_color);
         Ok(())
+    }
+
+    /// Like ImageDecoder::prepare_image, but returns some additional information
+    fn prepare_image_helper(&mut self) -> ImageResult<(Size, SupportedColor)> {
+        if matches!(self.state, DdsDecodeState::Init(_)) {
+            let mut state = DdsDecodeState::Done;
+            std::mem::swap(&mut state, &mut self.state);
+            let DdsDecodeState::Init(reader) = state else {
+                unreachable!();
+            };
+
+            let options = ParseOptions::new_permissive(None);
+            let mut decoder =
+                Decoder::new_with_options(reader, &options).map_err(to_image_error)?;
+            if let Some(max_alloc) = self.limits.max_alloc {
+                decoder.options.memory_limit = max_alloc.try_into().unwrap_or(usize::MAX);
+            }
+            let layout = decoder.layout();
+
+            // We only support DDS files with:
+            // - A single main image with any number of mipmaps
+            // - A texture array of length 1 representing a cube map
+            match &layout {
+                DataLayout::Volume(_) => {
+                    return Err(ImageError::Decoding(DecodingError::new(
+                        format_hint(),
+                        "DDS volume textures are not supported for decoding",
+                    )))
+                }
+                DataLayout::TextureArray(texture_array) => {
+                    let supported_length = match texture_array.kind() {
+                        TextureArrayKind::Textures => 1,
+                        TextureArrayKind::CubeMaps => 6,
+                        TextureArrayKind::PartialCubeMap(cube_map_faces) => cube_map_faces.count(),
+                    };
+                    if texture_array.len() != supported_length as usize {
+                        return Err(ImageError::Decoding(DecodingError::new(
+                            format_hint(),
+                            "DDS texture arrays are not supported for decoding",
+                        )));
+                    }
+                }
+                DataLayout::Texture(_) => {}
+            }
+
+            self.state = DdsDecodeState::Header(decoder);
+        }
+
+        let decoder = match &self.state {
+            DdsDecodeState::Init(_) => unreachable!(),
+            DdsDecodeState::Header(inner) => inner,
+            DdsDecodeState::Done => {
+                return Err(ImageError::Parameter(ParameterError::from_kind(
+                    ParameterErrorKind::NoMoreData,
+                )));
+            }
+        };
+
+        let mut size = decoder.main_size();
+        let mut color = decoder.native_color();
+        let is_cubemap = decoder.layout().is_cube_map();
+
+        // all cube map faces are read as one RGBA image
+        if is_cubemap {
+            if let (Some(width), Some(height)) =
+                (size.width.checked_mul(4), size.height.checked_mul(3))
+            {
+                size.width = width;
+                size.height = height;
+                color.channels = Channels::Rgba;
+            } else {
+                return Err(ImageError::Decoding(DecodingError::new(
+                    format_hint(),
+                    "DDS cube map faces are too large to decode",
+                )));
+            }
+        }
+
+        let output_color = if let Some(req_color) = self.requested_color {
+            req_color
+        } else {
+            SupportedColor::from_dds_widen(color)
+        };
+        Ok((size, output_color))
     }
 }
 
 impl<R: Read + Seek> ImageDecoder for DdsDecoder<R> {
-    fn dimensions(&self) -> (u32, u32) {
-        (self.size.width, self.size.height)
+    fn format_attributes(&self) -> FormatAttributes {
+        let mut attributes = FormatAttributes::default();
+        attributes.icc = DecodedMetadataHint::None;
+        attributes.exif = DecodedMetadataHint::None;
+        attributes.xmp = DecodedMetadataHint::None;
+        attributes
     }
 
-    fn color_type(&self) -> ColorType {
-        self.color.image
-    }
-
-    fn original_color_type(&self) -> ExtendedColorType {
-        match self.inner.format() {
-            Format::R1_UNORM => ExtendedColorType::L1,
-            Format::B4G4R4A4_UNORM | Format::A4B4G4R4_UNORM => ExtendedColorType::Rgba4,
-            Format::A8_UNORM => ExtendedColorType::A8,
-            _ => SupportedColor::from_dds_widen(self.inner.native_color())
-                .image
-                .into(),
-        }
+    fn prepare_image(&mut self) -> ImageResult<DecoderPreparedImage> {
+        let (size, color) = self.prepare_image_helper()?;
+        Ok(DecoderPreparedImage::new(
+            size.width,
+            size.height,
+            color.image,
+        ))
     }
 
     fn set_limits(&mut self, limits: image::Limits) -> ImageResult<()> {
-        limits.check_dimensions(self.size.width, self.size.height)?;
-
         if let Some(max_alloc) = limits.max_alloc {
-            self.inner.options.memory_limit = max_alloc.try_into().unwrap_or(usize::MAX);
+            if let DdsDecodeState::Header(inner) = &mut self.state {
+                inner.options.memory_limit = max_alloc.try_into().unwrap_or(usize::MAX);
+            }
         }
 
+        let info = self.prepare_image()?;
+        limits.check_dimensions(info.layout.width, info.layout.height)?;
         Ok(())
     }
 
     #[track_caller]
-    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
-        let color = self.color.dds;
-        let size = self.size;
+    fn read_image(&mut self, buf: &mut [u8]) -> ImageResult<DecodedImageAttributes> {
+        let (size, color) = self.prepare_image_helper()?;
+
+        let mut state = DdsDecodeState::Done;
+        std::mem::swap(&mut self.state, &mut state);
+        let DdsDecodeState::Header(mut decoder) = state else {
+            unreachable!();
+        };
 
         assert_eq!(
             buf.len(),
-            color.buffer_size(size).unwrap(),
+            color.dds.buffer_size(size).unwrap(),
             "Buffer len does not match for {:?} and {:?}",
             size,
-            color
+            color.dds
         );
 
-        let image = ImageViewMut::new(buf, size, color).expect("Invalid buffer length");
+        let image = ImageViewMut::new(buf, size, color.dds).expect("Invalid buffer length");
 
-        if self.is_cubemap {
-            self.inner.read_cube_map(image).map_err(to_image_error)?;
+        if decoder.layout().is_cube_map() {
+            decoder.read_cube_map(image).map_err(to_image_error)?;
         } else {
-            self.inner.read_surface(image).map_err(to_image_error)?;
+            decoder.read_surface(image).map_err(to_image_error)?;
         }
 
-        Ok(())
+        let mut attribs = DecodedImageAttributes::default();
+        attribs.original_color_type = Some(match decoder.format() {
+            Format::R1_UNORM => ExtendedColorType::L1,
+            Format::B4G4R4A4_UNORM | Format::A4B4G4R4_UNORM => ExtendedColorType::Rgba4,
+            Format::A8_UNORM => ExtendedColorType::A8,
+            _ => SupportedColor::from_dds_widen(decoder.native_color())
+                .image
+                .into(),
+        });
+        Ok(attribs)
     }
 
-    fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
-        (*self).read_image(buf)
-    }
-}
-
-impl<R: Read + Seek> ImageDecoderRect for DdsDecoder<R> {
-    fn read_rect(
-        &mut self,
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-        buf: &mut [u8],
-        row_pitch: usize,
-    ) -> ImageResult<()> {
-        // reading rectangles is not supported for cube maps
-        if self.is_cubemap {
-            return Err(ImageError::Decoding(DecodingError::new(
-                format_hint(),
-                "read_rect is not supported for DDS cubemaps",
-            )));
+    fn more_images(&self) -> SequenceControl {
+        if matches!(self.state, DdsDecodeState::Done) {
+            SequenceControl::None
+        } else {
+            SequenceControl::MaybeMore
         }
-
-        let Some(view) =
-            ImageViewMut::new_with(buf, row_pitch, Size::new(width, height), self.color.dds)
-        else {
-            return Err(ImageError::Decoding(DecodingError::new(
-                format_hint(),
-                "Invalid buffer length for reading rect",
-            )));
-        };
-
-        self.inner
-            .read_surface_rect(view, Offset::new(x, y))
-            .map_err(to_image_error)?;
-        self.inner
-            .rewind_to_previous_surface()
-            .map_err(to_image_error)?;
-
-        Ok(())
     }
 }
 
 /// A color type supported by both the `image` and `dds` crates.
+#[derive(Clone, Copy)]
 struct SupportedColor {
     image: ColorType,
     dds: ColorFormat,
