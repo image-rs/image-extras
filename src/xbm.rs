@@ -245,6 +245,29 @@ fn read_fixed_string<R: Iterator<Item = u8>>(
     }
     Ok(())
 }
+
+fn skip_non_define_lines<R: Iterator<Item = u8>>(
+    r: &mut TextReader<R>,
+    part: XbmPart,
+) -> Result<(), XbmDecodeError> {
+    loop {
+        if r.peek() == Some(b'#') {
+            break;
+        }
+
+        loop {
+            let Some(b) = r.next() else {
+                return Err(XbmDecodeError::Parse(part, r.loc()));
+            };
+
+            if b == b'\n' {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
 // Read a single byte
 fn read_byte<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
@@ -410,6 +433,13 @@ fn read_xbm_header<'a, R: Iterator<Item = u8>>(
     //  #define <name>_y_hot <y>
     //  static <type> <name>_bits[] = { ...
     let mut int_buf = [0u8; 11]; // -2^31 and 2^32 fit in 11 bytes
+
+    // Ignore any leading non-#define lines, because some XBM-like files start with a copyright
+    // specification comment. libx11's implementation also permits this (and is actually
+    // somewhat more general and may try to extract an XBM file that is embedded into a
+    // random portion of C source code; but this is quite far from the spec and doesn't appear
+    // necessary in practice.)
+    skip_non_define_lines(r, XbmPart::Width)?;
 
     // Read width field and acquire name.
     read_fixed_string(r, b"#define", XbmPart::Width)?;
