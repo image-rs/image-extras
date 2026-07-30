@@ -172,8 +172,13 @@ fn decode_png(data: &[u8], size: u32, buf: &mut [u8], allocation_limit: u64) -> 
             let mut tmp = vec![0u8; (size as usize) * (size as usize) * 2];
             reader.next_frame(&mut tmp).map_err(png_to_image_error)?;
 
-            for (ga, rgba) in tmp.chunks_exact(2).zip(buf.chunks_exact_mut(4)) {
-                rgba.copy_from_slice(&[ga[0], ga[0], ga[0], ga[1]]);
+            for (&[g, a], rgba) in tmp
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .zip(buf.as_chunks_mut::<4>().0)
+            {
+                *rgba = [g, g, g, a];
             }
         }
         png::ColorType::Rgba => {
