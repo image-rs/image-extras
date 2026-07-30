@@ -1077,8 +1077,8 @@ impl<R: BufRead> ImageDecoder for XpmDecoder<R> {
         // Read main image contents
         let stride = (self.info.width as usize).checked_mul(8).unwrap();
         for (i, row) in buf.chunks_exact_mut(stride).enumerate() {
-            for chunk in row.chunks_exact_mut(8) {
-                read_xpm_pixel(&mut self.r, &self.info, &palette, chunk.try_into().unwrap())
+            for chunk in row.as_chunks_mut::<8>().0 {
+                read_xpm_pixel(&mut self.r, &self.info, &palette, chunk)
                     .apply_after(&mut self.r.inner.error)?;
             }
 
