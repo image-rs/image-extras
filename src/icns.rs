@@ -140,7 +140,8 @@ fn jp2_to_image_error(err: ImageError) -> ImageError {
 /// - `size: u32`: the expected width and height of the image. Will be `> 0` and `<= 1024`
 /// - `buf: &mut [u8]`: array of bytes into which to write RGBA data. Will have size `4*size*size`
 /// - `allocation_limit: u64`: a soft limit on how much memory to allocate while decoding
-pub type SubformatDecodeFn = Box<dyn Fn(&[u8], u32, &mut [u8], u64) -> ImageResult<()>>;
+pub type SubformatDecodeFn =
+    Box<dyn Fn(&[u8], u32, &mut [u8], u64) -> ImageResult<()> + Send + Sync>;
 
 /// A function of type [SubformatDecodeFn] that decodes the PNG image in `data` into `buf`.
 ///
@@ -526,4 +527,13 @@ impl<R: Read + Seek> ImageDecoder for IcnsDecoder<R> {
     fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
         (*self).read_image(buf)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const fn assert_send_sync<T: Send + Sync>() {}
+
+    const _: () = assert_send_sync::<IcnsDecoder<Cursor<&[u8]>>>();
 }
