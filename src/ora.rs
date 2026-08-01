@@ -19,13 +19,6 @@ use std::io::{self, BufReader, Read, Seek};
 use std::marker::PhantomData;
 use zip::read::{ZipArchive, ZipFile};
 
-pub struct OpenRasterDecoder<'a, R>
-where
-    R: Read + Seek + 'a,
-{
-    mergedimg_decoder: PngDecoder<BufReader<SeekableArchiveFile<'a, R>>>,
-}
-
 fn openraster_format_hint() -> ImageFormatHint {
     ImageFormatHint::Name("OpenRaster".into())
 }
@@ -52,8 +45,8 @@ fn set_ora_image_type(err: ImageError) -> ImageError {
 }
 
 #[self_referencing]
-struct SeekableArchiveCore<'a, R: Read + Seek + 'a> {
-    archive: ZipArchive<R>,
+struct SeekableArchiveCore<'a, 'zip: 'a, R: Read + Seek + 'a> {
+    archive: &'zip mut ZipArchive<R>,
     #[covariant]
     #[borrows(mut archive)]
     file: ZipFile<'this, R>,
@@ -64,18 +57,18 @@ struct SeekableArchiveCore<'a, R: Read + Seek + 'a> {
 /// entries, while png::Decoder requires the Seek bound (but does not currently
 /// use it). This structure implements Seek by reopening and reading the zip
 /// archive entry whenever it seeks backwards.
-struct SeekableArchiveFile<'a, R: Read + Seek + 'a> {
-    core: Option<SeekableArchiveCore<'a, R>>,
+struct SeekableArchiveFile<'a, 'zip, R: Read + Seek + 'a> {
+    core: Option<SeekableArchiveCore<'a, 'zip, R>>,
     file_index: usize,
     position: u64,
     file_size: u64,
 }
 
-impl<'a, R: Read + Seek + 'a> SeekableArchiveFile<'a, R> {
+impl<'a, 'zip, R: Read + Seek + 'a> SeekableArchiveFile<'a, 'zip, R> {
     fn new(
-        archive: ZipArchive<R>,
+        archive: &'zip mut ZipArchive<R>,
         file_index: usize,
-    ) -> Result<SeekableArchiveFile<'a, R>, io::Error> {
+    ) -> Result<SeekableArchiveFile<'a, 'zip, R>, io::Error> {
         let core = SeekableArchiveCore::try_new(archive, |x| x.by_index(file_index), PhantomData)
             .map_err(|x| io::Error::other(format!("failed to open: {:?}", x)))?;
         let file_size = core.with_file(|file| file.size());
@@ -88,7 +81,7 @@ impl<'a, R: Read + Seek + 'a> SeekableArchiveFile<'a, R> {
     }
 }
 
-impl<R: Read + Seek> Read for SeekableArchiveFile<'_, R> {
+impl<R: Read + Seek> Read for SeekableArchiveFile<'_, '_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let res = self
             .core
@@ -103,7 +96,7 @@ impl<R: Read + Seek> Read for SeekableArchiveFile<'_, R> {
     }
 }
 
-impl<R: Read + Seek> Seek for SeekableArchiveFile<'_, R> {
+impl<R: Read + Seek> Seek for SeekableArchiveFile<'_, '_, R> {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let target_pos = match pos {
             io::SeekFrom::Start(offset) => offset,
@@ -171,9 +164,26 @@ fn verify_archive(archive: &mut ZipArchive<impl Read + Seek>) -> ImageResult<()>
     Ok(())
 }
 
-impl<'a, R> OpenRasterDecoder<'a, R>
+pub struct OpenRasterDecoder<R>
 where
-    R: Read + Seek + 'a,
+    R: Read + Seek,
+{
+    dimensions: (u32, u32),
+    color_type: ColorType,
+    original_color_type: ExtendedColorType,
+    orientation: Orientation,
+    icc_profile: Option<Vec<u8>>,
+    exif_metadata: Option<Vec<u8>>,
+
+    limits: Limits,
+
+    archive: ZipArchive<R>,
+    mergedimage_index: usize,
+}
+
+impl<R> OpenRasterDecoder<R>
+where
+    R: Read + Seek,
 {
     /// Create a new `OpenRasterDecoder` with the provided limits.
     ///
@@ -187,7 +197,7 @@ where
     /// forms an OpenRaster file), memory constraints on the ZIP file decoding
     /// process have not yet been implemented; input ZIP files with very many
     /// entries may require significant amounts of memory to read.
-    pub fn with_limits(r: R, limits: Limits) -> Result<OpenRasterDecoder<'a, R>, ImageError> {
+    pub fn with_limits(r: R, limits: Limits) -> ImageResult<Self> {
         let mut archive = ZipArchive::new(r)
             .map_err(|e| ImageError::Decoding(DecodingError::new(openraster_format_hint(), e)))?;
 
@@ -200,48 +210,87 @@ where
             ))
         })?;
 
-        let file = SeekableArchiveFile::new(archive, mergedimage_index)?;
-        let decoder =
-            PngDecoder::with_limits(BufReader::new(file), limits).map_err(set_ora_image_type)?;
+        let file = SeekableArchiveFile::new(&mut archive, mergedimage_index)?;
+        let mut decoder = PngDecoder::with_limits(BufReader::new(file), limits.clone())
+            .map_err(set_ora_image_type)?;
 
-        Ok(OpenRasterDecoder {
-            mergedimg_decoder: decoder,
+        let dimensions = decoder.dimensions();
+        let color_type = decoder.color_type();
+        let original_color_type = decoder.original_color_type();
+        let orientation = decoder.orientation().map_err(set_ora_image_type)?;
+        let icc_profile = decoder.icc_profile().map_err(set_ora_image_type)?;
+        let exif_metadata = decoder.exif_metadata().map_err(set_ora_image_type)?;
+
+        // Drop the decoder now and re-create it later. This allows us to avoid
+        // a life time in the `OpenRasterDecoder` struct.
+        drop(decoder);
+
+        Ok(Self {
+            dimensions,
+            color_type,
+            original_color_type,
+            orientation,
+            icc_profile,
+            exif_metadata,
+
+            limits,
+
+            archive,
+            mergedimage_index,
         })
     }
 }
 
-impl<'a, R: Read + Seek + 'a> ImageDecoder for OpenRasterDecoder<'a, R> {
+impl<R: Read + Seek> ImageDecoder for OpenRasterDecoder<R> {
     fn dimensions(&self) -> (u32, u32) {
-        self.mergedimg_decoder.dimensions()
+        self.dimensions
     }
 
     fn color_type(&self) -> ColorType {
-        self.mergedimg_decoder.color_type()
+        self.color_type
     }
 
     fn original_color_type(&self) -> ExtendedColorType {
-        self.mergedimg_decoder.original_color_type()
+        self.original_color_type
     }
 
     fn set_limits(&mut self, limits: Limits) -> ImageResult<()> {
         // Warning: this does not account for any ZIP reading overhead
-        self.mergedimg_decoder.set_limits(limits)
+        self.limits = limits;
+        self.limits
+            .check_dimensions(self.dimensions.0, self.dimensions.1)
     }
 
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        self.mergedimg_decoder.icc_profile()
+        Ok(self.icc_profile.clone())
     }
 
     fn exif_metadata(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        self.mergedimg_decoder.exif_metadata()
+        Ok(self.exif_metadata.clone())
     }
 
     fn orientation(&mut self) -> ImageResult<Orientation> {
-        self.mergedimg_decoder.orientation()
+        Ok(self.orientation)
     }
 
-    fn read_image(self, buf: &mut [u8]) -> ImageResult<()> {
-        self.mergedimg_decoder.read_image(buf)
+    fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
+        // re-open mergedimage.png file and decode it with the provided limits
+        let file = SeekableArchiveFile::new(&mut self.archive, self.mergedimage_index)
+            .map_err(ImageError::IoError)?;
+        let decoder = PngDecoder::with_limits(BufReader::new(file), self.limits.clone())
+            .map_err(set_ora_image_type)?;
+
+        // `ImageDecoder::read_image` will panic if the dimensions and color type
+        // don't match those from the initial header parsing.
+        // Check them here and return an error instead.
+        if decoder.dimensions() != self.dimensions || decoder.color_type() != self.color_type {
+            return Err(ImageError::Decoding(DecodingError::new(
+                openraster_format_hint(),
+                "Merged image dimensions and color type changed",
+            )));
+        }
+
+        decoder.read_image(buf)
     }
 
     fn read_image_boxed(self: Box<Self>, buf: &mut [u8]) -> ImageResult<()> {
