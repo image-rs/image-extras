@@ -48,8 +48,6 @@ enum DecoderError {
     MissingMask(IconType),
     /// Image entry length field impossibly short
     BadEntryLength,
-    /// An image entry, expected to be have either PNG or Jpeg 2000 content, had neither
-    NotPNGorJP2(IconType),
     /// An image entry with PNG contents had size inconsistent with the icon
     BadPngSize(u32, u32, u32),
     /// An image entry with JP2 contents had size inconsistent with the icon
@@ -84,9 +82,6 @@ impl Display for DecoderError {
             DecoderError::BadEntryLength => f.write_str(
                 "Image file contained an entry with invalid length (less than 8)"
             ),
-            DecoderError::NotPNGorJP2(t) => f.write_fmt(format_args!(
-                "Image file entry of type {t:?} contained neither PNG nor Jpeg 2000 data"
-            )),
             DecoderError::BadPngSize(w,h,s) => f.write_fmt(format_args!(
                 "Image file entry with PNG data had size {w}x{h} instead of expected {s}x{s}"
             )),
@@ -259,6 +254,7 @@ impl IcnsEntry {
             // RLE24 entries have an associated 8 bit mask
             Encoding::RLE24 => 32,
             Encoding::JP2PNG => 32,
+            Encoding::ARGB => 32,
         };
         (
             self.code.pixel_width(),
@@ -460,27 +456,28 @@ impl<R: Read + Seek> ImageDecoder for IcnsDecoder<R> {
             0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
         ];
 
-        if self.main.code.encoding() == Encoding::JP2PNG {
-            // Handle JP2 or PNG images _directly_ in this implementation, in order
-            // to implement memory limits and make it easier to keep these complicated
-            // format decoders up to date.
-            if main_data.starts_with(PNG_SIGNATURE) {
-                decode_png(
-                    &main_data,
-                    self.main.code.pixel_width(),
-                    buf,
-                    self.limits.max_alloc.unwrap_or(u64::MAX),
-                )?;
-            } else if main_data.starts_with(JP2_SIGNATURE) {
-                (self.jp2)(
-                    &main_data,
-                    self.main.code.pixel_width(),
-                    buf,
-                    self.limits.max_alloc.unwrap_or(u64::MAX),
-                )?;
-            } else {
-                return Err(DecoderError::NotPNGorJP2(self.main.code).into());
-            }
+        let encoding = self.main.code.encoding();
+        let has_subformat = encoding == Encoding::JP2PNG || encoding == Encoding::ARGB;
+
+        // Handle JP2 or PNG images directly in this implementation, in order
+        // to implement memory limits and make it easier to keep these
+        // complicated format decoders up to date. The signature checks exactly
+        // match icns's checks, so if the data does not match either signature,
+        // `main.decode_image...` below will not attempt either PNG or JP2 decoding.
+        if has_subformat && main_data.starts_with(PNG_SIGNATURE) {
+            decode_png(
+                &main_data,
+                self.main.code.pixel_width(),
+                buf,
+                self.limits.max_alloc.unwrap_or(u64::MAX),
+            )?;
+        } else if has_subformat && main_data.starts_with(JP2_SIGNATURE) {
+            (self.jp2)(
+                &main_data,
+                self.main.code.pixel_width(),
+                buf,
+                self.limits.max_alloc.unwrap_or(u64::MAX),
+            )?;
         } else {
             let main = IconElement::new(self.main.code.ostype(), main_data);
 
