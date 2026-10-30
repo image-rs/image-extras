@@ -21,8 +21,12 @@
 //! - More relaxed header comment parsing (allowing different whitespace around `XPM` in `/* XPM */`)
 //! - Loading with a different color table
 //!
+//! Like libXpm, everything between the `/* XPM */` line and the first string is skipped
+//! (honoring C comments) without being checked, so the array declaration may use any name,
+//! including the file paths that some tools write there.
+//!
 //! This is a somewhat strict decoder and will reject many broken image files, including:
-//! - those using the XPM2 header or `static char ** name = {` array string
+//! - those using the XPM2 header
 //! - those missing a trailing "," on lines, or which use ";" instead of ","
 //! - those with color data lines that are too long
 //! - those which have content after the final semicolon which is not a C comment
@@ -327,35 +331,6 @@ fn fold_to_lower(x: u8) -> u8 {
     }
 }
 
-/// Read a C keyword into the buffer and returns a slice of the buffer for the
-/// keyword.
-///
-/// The only allowed characters are a-z, A-Z, and _. Reading will stop if
-/// a non-allowed character or EOF is reached. If the buffer is too small, an
-/// error will be returned.
-fn read_keyword<'buf, R: Iterator<Item = u8>>(
-    r: &mut TextReader<R>,
-    buf: &'buf mut [u8],
-    part: XpmPart,
-) -> Result<&'buf [u8], XpmDecodeError> {
-    let mut len = 0;
-
-    while let Some(b) = r.peek() {
-        if matches!(b, b'_' | b'a'..=b'z' | b'A'..=b'Z') {
-            if len >= buf.len() {
-                // identifier too long
-                return Err(XpmDecodeError::Parse(part, r.loc()));
-            }
-            buf[len] = b;
-            len += 1;
-            r.next();
-        } else {
-            break;
-        }
-    }
-
-    Ok(&buf[..len])
-}
 /// Read precisely the string `s` from `r`, or error.
 fn read_fixed_string<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
@@ -453,18 +428,6 @@ fn skip_whitespace_and_comments<R: Iterator<Item = u8>>(
     Ok(nbytes)
 }
 
-/// Skips at least one whitespace or comment.
-fn skip_non_empty_whitespace_and_comments<R: Iterator<Item = u8>>(
-    r: &mut TextReader<R>,
-    part: XpmPart,
-) -> Result<(), XpmDecodeError> {
-    let spaces = skip_whitespace_and_comments(r, part)?;
-    if spaces == 0 {
-        return Err(XpmDecodeError::Parse(part, r.loc()));
-    }
-    Ok(())
-}
-
 fn skip_spaces_and_tabs<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
 ) -> Result<usize, XpmDecodeError> {
@@ -481,25 +444,6 @@ fn skip_spaces_and_tabs<R: Iterator<Item = u8>>(
     Ok(nbytes)
 }
 
-/// Read a mixture of ' ' and '\t', until reading '\n'.
-fn read_to_newline<R: Iterator<Item = u8>>(
-    r: &mut TextReader<R>,
-    part: XpmPart,
-) -> Result<(), XpmDecodeError> {
-    while let Some(b) = r.peek() {
-        if b == b' ' || b == b'\t' {
-            r.next();
-            continue;
-        } else {
-            break;
-        }
-    }
-    if read_byte(r, part)? != b'\n' {
-        Err(XpmDecodeError::Parse(part, r.loc()))
-    } else {
-        Ok(())
-    }
-}
 /// Read token into the buffer until the buffer size is exceeded, or ' ' or '\t' or '"' is found
 /// \ characters are forbidden. Returns the region of data read.
 fn read_until_whitespace_or_eos<'a, R: Iterator<Item = u8>>(
@@ -550,29 +494,31 @@ fn read_all_except_eos<R: Iterator<Item = u8>>(
     Err(XpmDecodeError::Parse(part, r.loc()))
 }
 
-/// Read the name portion of the file (but do not validate it, because some old files
-/// may put invalid characters here (like "." and "-") or use 8-bit character sets instead
-/// of Unicode.)
-fn read_name<R: Iterator<Item = u8>>(
+/// Skip to the start of the first string, like libXpm does: whatever comes before it (normally
+/// `static char *name[] = {`) is not checked, because some files use invalid names there (like
+/// file paths) or use 8-bit character sets instead of Unicode. C-style /* comments */ are
+/// honored, so a " inside a comment does not start the string. Stops before the ".
+fn skip_to_first_string<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
     part: XpmPart,
 ) -> Result<(), XpmDecodeError> {
-    let mut empty = true;
+    // `has_first_char`: If out of comment, has / ; if in comment, has *
+    let mut has_first_char = false;
+    let mut in_comment = false;
+
     while let Some(b) = r.peek() {
-        match b {
-            b'/' | b' ' | b'\t' | b'\n' | b'[' => {
-                break;
-            }
-            _ => (),
+        if in_comment {
+            in_comment = !(has_first_char && b == b'/');
+            has_first_char = b == b'*';
+        } else if b == b'"' {
+            return Ok(());
+        } else {
+            in_comment = has_first_char && b == b'*';
+            has_first_char = b == b'/';
         }
         r.next();
-        empty = false;
     }
-    if empty {
-        return Err(XpmDecodeError::Parse(part, r.loc()));
-    }
-
-    Ok(())
+    Err(XpmDecodeError::Parse(part, r.loc()))
 }
 
 /// Parse string into integer, rejecting leading + and leading zeros
@@ -702,44 +648,9 @@ fn parse_color(data: &[u8]) -> Result<[u16; 4], XpmDecodeError> {
 fn read_xpm_header<R: Iterator<Item = u8>>(
     r: &mut TextReader<R>,
 ) -> Result<XpmHeaderInfo, XpmDecodeError> {
-    let keyword_buf = &mut [0u8; 16];
-
     // Note: XPM3 header is `/* XPM */`
     read_fixed_string(r, b"/* XPM */", XpmPart::Header)?;
-    read_to_newline(r, XpmPart::Header)?;
-
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"static", XpmPart::ArrayStart)?;
-    skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-
-    // There may be an optional "const" keyword before "char".
-    // This is NOT part of the XPM 3 specification.
-    // This was added by ImageMagick 7.1.0-4 in mid 2021
-    // (https://github.com/ImageMagick/ImageMagick/commit/e7d3e182b72ff9b2c3ea1c9aa0f14d69cc968ba7)
-    // to help with C++ compiler warnings (https://github.com/ImageMagick/ImageMagick/issues/3951).
-    let keyword = read_keyword(r, keyword_buf, XpmPart::ArrayStart)?;
-    match keyword {
-        b"const" => {
-            skip_non_empty_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-            read_fixed_string(r, b"char", XpmPart::ArrayStart)?;
-        }
-        b"char" => (),
-        _ => return Err(XpmDecodeError::Parse(XpmPart::ArrayStart, r.loc())),
-    }
-
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"*", XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_name(r, XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"[", XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"]", XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"=", XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
-    read_fixed_string(r, b"{", XpmPart::ArrayStart)?;
-    skip_whitespace_and_comments(r, XpmPart::ArrayStart)?;
+    skip_to_first_string(r, XpmPart::ArrayStart)?;
 
     /* next: read \" */
     read_fixed_string(r, b"\"", XpmPart::FirstLine)?;
@@ -1171,6 +1082,61 @@ static char *test[] = {
         let decoder = XpmDecoder::new(&data[..]).unwrap();
         let mut image = vec![0; decoder.total_bytes() as usize];
         assert!(decoder.read_image(&mut image).is_ok());
+    }
+
+    #[test]
+    fn slash_in_name() {
+        let data = b"/* XPM */
+static char */tmp/dir/page-001[] = {
+\"1 1 1 1\",
+\"  c none\",
+\" \",
+};";
+        let decoder = XpmDecoder::new(&data[..]).unwrap();
+        let mut image = vec![0; decoder.total_bytes() as usize];
+        assert!(decoder.read_image(&mut image).is_ok());
+    }
+
+    #[test]
+    fn comment_in_declaration() {
+        // The " inside the comment must not be taken as the start of the first string
+        let data = b"/* XPM */
+static char *page/* \"2 2 1 1\", */001[] = {
+\"1 1 1 1\",
+\"  c none\",
+\" \",
+};";
+        let decoder = XpmDecoder::new(&data[..]).unwrap();
+        assert_eq!(decoder.dimensions(), (1, 1));
+        let mut image = vec![0; decoder.total_bytes() as usize];
+        assert!(decoder.read_image(&mut image).is_ok());
+    }
+
+    #[test]
+    fn header_rejected() {
+        // Not an XPM3 header
+        let data = b"/* XPM2 */
+static char *test[] = {
+\"1 1 1 1\",
+\"  c none\",
+\" \",
+};";
+        assert!(XpmDecoder::new(&data[..]).is_err());
+
+        // No string at all
+        let data = b"/* XPM */
+static char *test[] = {
+};";
+        assert!(XpmDecoder::new(&data[..]).is_err());
+
+        // The only strings are inside an unterminated comment
+        let data = b"/* XPM */
+static char *test[] = { /*
+\"1 1 1 1\",
+\"  c none\",
+\" \",
+};";
+        assert!(XpmDecoder::new(&data[..]).is_err());
     }
 
     #[test]
